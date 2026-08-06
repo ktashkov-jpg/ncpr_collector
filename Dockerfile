@@ -46,6 +46,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY tests ./tests
+COPY pytest.ini ./pytest.ini
 COPY docs ./docs
 COPY Dockerfile ./Dockerfile
 COPY docker-compose.yml ./docker-compose.yml
