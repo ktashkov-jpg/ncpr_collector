@@ -18,14 +18,26 @@ RUN apt-get update \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-RUN groupadd --gid "${HOST_GID}" appgroup \
-    && useradd \
-        --uid "${HOST_UID}" \
-        --gid "${HOST_GID}" \
-        --create-home \
-        --home-dir /tmp/app-home \
-        --shell /bin/bash \
-        appuser
+# Create the runtime identity only if that uid/gid is not already present.
+# On a host where the operator is root, HOST_UID/HOST_GID are 0 and a plain
+# groupadd/useradd fails because root already exists -- which broke the build
+# rather than the run, so it looked like a code fault. /tmp/app-home is
+# created unconditionally because an existing account (root) will not get it
+# from useradd.
+RUN if ! getent group "${HOST_GID}" >/dev/null 2>&1; then \
+        groupadd --gid "${HOST_GID}" appgroup; \
+    fi \
+    && if ! getent passwd "${HOST_UID}" >/dev/null 2>&1; then \
+        useradd \
+            --uid "${HOST_UID}" \
+            --gid "${HOST_GID}" \
+            --create-home \
+            --home-dir /tmp/app-home \
+            --shell /bin/bash \
+            appuser; \
+    fi \
+    && mkdir -p /tmp/app-home \
+    && chown "${HOST_UID}:${HOST_GID}" /tmp/app-home
 
 WORKDIR /app
 

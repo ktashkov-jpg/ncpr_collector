@@ -5,16 +5,34 @@ the request policy come from `NCPR_SESPA_SOAP_GTIN_Runbook.docx` (§ refs).
 
 ## First run on a new host
 
+**This step is not optional.** Compose reads `.env` for `${DATA_ROOT}`; with
+no file it interpolates to empty and fails with
+`invalid spec: :/data: empty section between colons`.
+
 ```bash
 cp .env.example .env
 ```
 
-Set `DATA_ROOT`, and set `HOST_UID`/`HOST_GID` to the host user so files on
-the volume are not root-owned:
+Set `DATA_ROOT` to an absolute path, and set `HOST_UID`/`HOST_GID` so files
+on the volume are owned by a real host identity:
 
 ```bash
 id -u && id -g
 ```
+
+### If you are running as root
+
+Leave `HOST_UID=1000` / `HOST_GID=1000` and give the data directory to that
+identity — do **not** set them to `0`. The container drops to that uid, so
+a root-owned volume is unwritable:
+
+```bash
+mkdir -p /srv/ncpr-collector/data && chown -R 1000:1000 /srv/ncpr-collector/data
+```
+
+The image tolerates `HOST_UID=0` if you insist (it skips creating an account
+that already exists), but running the collector as root buys nothing and
+leaves root-owned files on the volume.
 
 ```bash
 docker compose build
