@@ -110,7 +110,10 @@ def load_reconstructed(path: Path) -> list[tuple[str, str]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--annex", required=True, type=Path)
+    # Not required: with no --annex the newest Prilogenie-*.xlsx in the input
+    # directory is used, so `fetch_register` then `queue_build` needs no path
+    # passed between them.
+    parser.add_argument("--annex", type=Path)
     # Defaults point at the archive volume, not at the authoring machine.
     # These were hardcoded Windows paths, which on the Linux host resolved to
     # nothing and silently produced a queue with every task in the lowest
@@ -134,6 +137,17 @@ def main() -> None:
     config = Config()
     config.ensure_dirs()
     store = Store(config.db_path)
+
+    if args.annex is None:
+        candidates = sorted(Path(config.input_dir).glob("Prilogenie-*.xlsx"))
+        if not candidates:
+            raise SystemExit(
+                f"No workbook given and none found in {config.input_dir}.\n"
+                f"Run: python -m app.fetch_register --appendix 4")
+        # Filenames carry DD-MM-YYYY, which does not sort chronologically as
+        # text, so pick by modification time rather than by name.
+        args.annex = max(candidates, key=lambda p: p.stat().st_mtime)
+        print(f"using {args.annex.name} (newest in {config.input_dir})\n")
 
     # Priority ordering is the whole design of this queue: without the
     # reference files every task collapses into the lowest band and the

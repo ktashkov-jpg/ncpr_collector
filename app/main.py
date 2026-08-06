@@ -118,6 +118,9 @@ def main() -> int:
                         "(WSDL/XSD only — does not consume the daily cap)")
     sub.add_parser("enumerate",
                    help="see: python -m app.enumerate_catalogue --help")
+    sub.add_parser("fetch-register",
+                   help="see: python -m app.fetch_register --help "
+                        "(download the current workbook by URL convention)")
     sub.add_parser("probe",
                    help="see: python -m app.probe --help "
                         "(one audited ad-hoc lookup)")
@@ -140,6 +143,10 @@ def main() -> int:
     if args.command == "collect":
         from app.collect import main as collect_main
         collect_main()
+        return 0
+    if args.command == "fetch-register":
+        print("Run: python -m app.fetch_register --appendix 4\n"
+              "  (defaults to the latest 2nd-of-month publication)")
         return 0
     if args.command == "probe":
         print("Run: python -m app.probe --gtin <value> | --natid <id>")
