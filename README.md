@@ -59,7 +59,7 @@ originate from the whitelisted host** (§3). `doctor` prints the actual egress
 IP; compare it with the address registered with NCPR.
 
 ```bash
-docker compose run --rm ncpr-collector python -m app.queue_build --annex /data/Prilogenie-4-02-07-2026.xlsx --include-reverse
+docker compose run --rm ncpr-collector python -m app.queue_build --annex /archive/Prilogenie-4-02-07-2026.xlsx --include-reverse
 ```
 
 ```bash

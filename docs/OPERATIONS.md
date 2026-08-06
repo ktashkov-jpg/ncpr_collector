@@ -70,11 +70,17 @@ it does not, stop: requests will 403 and a 403 halts the collector.
 
 ## Build the queue
 
-Put the Annex 4 workbook on the data volume first.
+Put the Annex 4 workbook on the **archive** volume — that is the shared
+folder, so it can be dropped there over SMB without touching the host.
 
 ```bash
-docker compose run --rm ncpr-collector python -m app.queue_build --annex /data/Prilogenie-4-02-07-2026.xlsx --include-reverse
+docker compose run --rm ncpr-collector python -m app.queue_build --annex /archive/Prilogenie-4-02-07-2026.xlsx --include-reverse
 ```
+
+Expect roughly: 32,449 rows read, 3,135 active, and a queue of ~3,414 tasks
+across bands 10/20/40. If `active` comes back near zero, the workbook's
+declared range is the cause — see the `reset_dimensions()` note in
+`queue_build.read_annex`.
 
 Add `--contested contested.csv` (a CSV with a `reg_number` column) to promote
 registrations our own matchers disagree on into priority band 30.
