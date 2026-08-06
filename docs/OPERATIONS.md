@@ -1,12 +1,12 @@
-﻿# Operations
+# Operations
 
 Day-to-day commands. Policy rationale lives in `README.md`; the protocol and
-the request policy come from `NCPR_SESPA_SOAP_GTIN_Runbook.docx` (Â§ refs).
+the request policy come from `NCPR_SESPA_SOAP_GTIN_Runbook.docx` (§ refs).
 
 ## First run on a new host
 
-**This step is not optional.** Compose reads `.env` for `${DATA_ROOT}`; with
-no file it interpolates to empty and fails with
+**This step is not optional.** Compose reads `.env` for `${DB_ROOT}`; with no
+file it interpolates to empty and fails with
 `invalid spec: :/data: empty section between colons`.
 
 ```bash
@@ -18,10 +18,10 @@ cp .env.example .env
 | var | holds | put it on |
 |---|---|---|
 | `DB_ROOT` | SQLite, lock, `HALTED` | **local** ext4/xfs/zfs/btrfs |
-| `ARCHIVE_ROOT` | raw XML, exports, WSDL | anywhere â€” a shared folder is the point |
+| `ARCHIVE_ROOT` | `input/`, `raw/`, exports, WSDL | anywhere — a shared folder is the point |
 
 `DB_ROOT` carries the daily counter that enforces the rate cap, and SQLite
-needs working POSIX locks. **Never put it on a CIFS/SMB mount** â€” a corrupted
+needs working POSIX locks. **Never put it on a CIFS/SMB mount** — a corrupted
 counter means uncontrolled request volume against an allowlisted service.
 A locally-mounted ZFS dataset is fine even if OMV re-exports it over SMB;
 what matters is how *this host* mounts it. Check before assuming:
@@ -33,11 +33,26 @@ findmnt -T /path/you/plan/to/use -o TARGET,SOURCE,FSTYPE,OPTIONS
 `fstype` of `ext4`/`xfs`/`zfs`/`btrfs` is fine. `cifs` is not.
 `ARCHIVE_ROOT` defaults to `DB_ROOT` if you want a single path.
 
+### Archive layout
+
+```
+$ARCHIVE_ROOT/
+├── input/      operator-supplied reference data (you put files here)
+├── raw/        archived SOAP responses, one XML per call
+├── service.wsdl
+└── ncpr_gtin_crosswalk.csv
+```
+
+`input/` is separated so supplied data is never confused with harvest — the
+same split as `bda-smpc-corpus`. It is also the reason `ARCHIVE_ROOT` wants
+to be the shared folder: reference files can be dropped in over SMB without
+touching the host.
+
 ### Ownership
 
-The container drops to `HOST_UID:HOST_GID`, so **both** directories must be
+The container drops to `HOST_UID:HOST_GID`, so **both** roots must be
 writable by that identity. On OMV a shared folder is usually `root:users`,
-and `users` is GID **100** on Debian â€” not 1000. Match what is actually
+and `users` is GID **100** on Debian — not 1000. Match what is actually
 there rather than guessing:
 
 ```bash
@@ -58,8 +73,8 @@ docker compose build
 ```
 
 **Always `doctor` before collecting.** The most likely failure is running from
-the wrong egress address â€” an SSH session alone does not make requests
-originate from the whitelisted host (Â§3):
+the wrong egress address — an SSH session alone does not make requests
+originate from the whitelisted host (§3):
 
 ```bash
 docker compose run --rm ncpr-collector python -m app.main doctor
@@ -67,23 +82,39 @@ docker compose run --rm ncpr-collector python -m app.main doctor
 
 Check that the printed egress IP matches the address registered with NCPR. If
 it does not, stop: requests will 403 and a 403 halts the collector.
+`doctor` never calls the product operations, so it cannot consume the daily
+cap — run it as often as you like.
 
 ## Build the queue
 
-Put the Annex 4 workbook on the **archive** volume â€” that is the shared
-folder, so it can be dropped there over SMB without touching the host.
+Put three files in `$ARCHIVE_ROOT/input/`:
+
+| file | without it |
+|---|---|
+| `Prilogenie-4-02-07-2026.xlsx` | nothing to queue |
+| `drug_ref_min.csv` | band 20 cannot be identified — everything falls to band 40 |
+| `salvia_products.csv` | band 10 (reconstruction validation) is empty |
 
 ```bash
 docker compose run --rm ncpr-collector python -m app.queue_build --annex /archive/input/Prilogenie-4-02-07-2026.xlsx --include-reverse
 ```
 
-Expect roughly: 32,449 rows read, 3,135 active, and a queue of ~3,414 tasks
-across bands 10/20/40. If `active` comes back near zero, the workbook's
-declared range is the cause â€” see the `reset_dimensions()` note in
-`queue_build.read_annex`.
+Expect: 32,449 rows read, 3,135 active, ~3,414 tasks across bands 10/20/40.
+Missing reference data is refused rather than silently degraded — a queue
+with everything in band 40 runs the most decisive answers *last*, which is
+the worst possible ordering for a 40-day job.
 
 Add `--contested contested.csv` (a CSV with a `reg_number` column) to promote
 registrations our own matchers disagree on into priority band 30.
+
+**Re-running does not re-prioritise.** Tasks are inserted with
+`INSERT OR IGNORE`, so an existing row keeps its original band. To rebuild an
+ordering, delete the database first — safe only while nothing has been
+collected:
+
+```bash
+rm "$DB_ROOT/ncpr.sqlite3"
+```
 
 ## Collect
 
@@ -99,7 +130,7 @@ docker compose logs -f ncpr-collector
 docker compose run --rm ncpr-collector python -m app.main status
 ```
 
-Stopping is safe at any point â€” state is checkpointed per response and
+Stopping is safe at any point — state is checkpointed per response and
 `SIGTERM` interrupts the sleep rather than waiting it out:
 
 ```bash
@@ -112,28 +143,28 @@ docker compose down
 docker compose run --rm ncpr-collector python -m app.main export
 ```
 
-Writes `/data/ncpr_gtin_crosswalk.csv` with **every field quoted**, so a
-spreadsheet cannot turn `05712249101367` into `5.71225E+12`.
+Writes `$ARCHIVE_ROOT/ncpr_gtin_crosswalk.csv` with **every field quoted**, so
+a spreadsheet cannot turn `05712249101367` into `5.71225E+12`.
 
 ## If it halts
 
-A `403` or `429` writes `/data/HALTED` and the collector refuses to start
-while that file exists. This is deliberate â€” it is the one situation where a
-human must act before another request is sent.
+A `403` or `429` writes `HALTED` into `DB_ROOT` and the collector refuses to
+start while that file exists. This is deliberate — it is the one situation
+where a human must act before another request is sent.
 
 ```bash
-cat "$DATA_ROOT/HALTED"
+cat "$DB_ROOT/HALTED"
 ```
 
-1. **403** â€” confirm allowlist status with NCPR or the university network
+1. **403** — confirm allowlist status with NCPR or the university network
    administrator. Do not retry first. Check the egress IP with `doctor`; a
    changed public address is the most common innocent cause.
-2. **429** â€” honour `Retry-After`. If absent, wait at least 24 hours and seek
+2. **429** — honour `Retry-After`. If absent, wait at least 24 hours and seek
    guidance.
 3. Only then delete the file to resume:
 
 ```bash
-rm "$DATA_ROOT/HALTED"
+rm "$DB_ROOT/HALTED"
 ```
 
 The queue is unchanged: the interrupted task stays `pending` and is retried
@@ -142,17 +173,16 @@ in priority order.
 ## Changing the rate
 
 Edit `.env`, not the code. `app/config.py` refuses a delay below 60 s or a
-daily cap above 500 â€” both are guards against a careless override, not
+daily cap above 500 — both are guards against a careless override, not
 suggestions. Raising the rate without written guidance from NCPR risks the
 allowlist, which is the only access path.
 
 ## Tests
 
 ```bash
-docker compose run --rm ncpr-collector python -m pytest tests -q
+docker compose run --rm ncpr-collector python -m pytest -q
 ```
 
 Runs offline. `test_soap.py` checks the envelope and parser against the
-runbook's verified Â§7 response â€” including that `05712249101367` keeps its
+runbook's verified §7 response — including that `05712249101367` keeps its
 leading zero.
-
