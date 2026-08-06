@@ -81,6 +81,13 @@ class Config:
         return os.path.join(self.archive_dir, "raw")
 
     @property
+    def input_dir(self) -> str:
+        """Reference data supplied by the operator (Annex 4, drug_ref,
+        salvia). Kept apart from raw/ and the exports so inputs are never
+        confused with harvest — same layout as bda-smpc-corpus."""
+        return os.path.join(self.archive_dir, "input")
+
+    @property
     def wsdl_path(self) -> str:
         return os.path.join(self.archive_dir, "service.wsdl")
 
@@ -100,7 +107,7 @@ class Config:
         return os.path.join(self.db_dir, "collector.lock")
 
     def ensure_dirs(self) -> None:
-        for path in (self.db_dir, self.archive_dir, self.raw_dir):
+        for path in (self.db_dir, self.archive_dir, self.raw_dir, self.input_dir):
             os.makedirs(path, exist_ok=True)
 
     def validate(self) -> None:

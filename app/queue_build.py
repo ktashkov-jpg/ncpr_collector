@@ -118,10 +118,10 @@ def main() -> None:
     # the wrong order for 40 days. Missing reference data now warns loudly.
     parser.add_argument("--drug-ref", type=Path,
                         default=Path(os.environ.get(
-                            "NCPR_DRUG_REF", "/archive/drug_ref_min.csv")))
+                            "NCPR_DRUG_REF", "/archive/input/drug_ref_min.csv")))
     parser.add_argument("--salvia", type=Path,
                         default=Path(os.environ.get(
-                            "NCPR_SALVIA", "/archive/salvia_products.csv")))
+                            "NCPR_SALVIA", "/archive/input/salvia_products.csv")))
     parser.add_argument("--contested", type=Path,
                         help="optional CSV with a reg_number column")
     parser.add_argument("--include-reverse", action="store_true",
