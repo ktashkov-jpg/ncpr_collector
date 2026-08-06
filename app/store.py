@@ -73,6 +73,32 @@ CREATE TABLE IF NOT EXISTS meta (
     k TEXT PRIMARY KEY,
     v TEXT
 );
+
+-- Output of listMedicinalProducts. Carries no GTIN (the list item type has
+-- no gtins field) but does carry inn, atcCodes, medicamentForm, quantity,
+-- medicamentUnit and finalPack for every product -- i.e. the authoritative
+-- pack-selection metadata, obtained in a handful of paged calls rather than
+-- one call per product.
+CREATE TABLE IF NOT EXISTS catalogue (
+    medicinal_product_identifier TEXT NOT NULL,
+    register_code                TEXT NOT NULL,
+    register_medicament_id       TEXT,
+    register_name                TEXT,
+    name_bg                      TEXT,
+    name_en                      TEXT,
+    inn                          TEXT,
+    atc_codes                    TEXT,
+    authorization_holder         TEXT,
+    producer                     TEXT,
+    medicament_form              TEXT,
+    quantity                     TEXT,
+    medicament_unit              TEXT,
+    final_pack                   TEXT,
+    published_at                 TEXT,
+    retrieved_at                 TEXT NOT NULL,
+    PRIMARY KEY (medicinal_product_identifier, register_code)
+);
+CREATE INDEX IF NOT EXISTS ix_catalogue_reg ON catalogue(register_code);
 """
 
 
@@ -150,6 +176,29 @@ class Store:
             "ON CONFLICT(day) DO UPDATE SET used = used + 1", (day,))
         self.db.commit()
         return self.used_today(day)
+
+    # ---------- catalogue ----------
+
+    def save_catalogue(self, rows: list[dict]) -> int:
+        """Upsert list items. Re-running enumeration refreshes rather than
+        duplicating -- the same product legitimately appears in more than one
+        register, which is why the key is (identifier, register_code)."""
+        if not rows:
+            return 0
+        columns = list(rows[0])
+        marks = ", ".join("?" * len(columns))
+        self.db.executemany(
+            f"INSERT OR REPLACE INTO catalogue({', '.join(columns)}) "
+            f"VALUES ({marks})",
+            [tuple(row[c] for c in columns) for row in rows])
+        self.db.commit()
+        return len(rows)
+
+    def catalogue_stats(self) -> list[tuple[str, int, int]]:
+        return [(r["register_code"], r["n"], r["ids"]) for r in self.db.execute(
+            "SELECT register_code, COUNT(*) n, "
+            "COUNT(DISTINCT medicinal_product_identifier) ids "
+            "FROM catalogue GROUP BY register_code ORDER BY register_code")]
 
     # ---------- meta ----------
 

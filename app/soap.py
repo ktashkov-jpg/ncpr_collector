@@ -22,6 +22,30 @@ import xml.etree.ElementTree as ET
 
 FORWARD = "getMedicinalProductDataWithGTIN"
 REVERSE = "getMedicinalProductDataByGTIN"
+LIST = "listMedicinalProducts"
+
+# RegisterCode enumeration from the XSD. The GTIN scope is "ЛП включени в
+# ПЛС" -- the whole Positive Drug List -- so restricting enumeration to
+# PDL_APPENDIX_4 (the Annex 4 workbook) may undercount the universe.
+REGISTER_CODES = ("PDL_APPENDIX_1", "PDL_APPENDIX_2", "PDL_APPENDIX_3",
+                  "PDL_APPENDIX_4", "CEILING_PRICES", "MAX_PRICES")
+
+LIST_ENVELOPE = """<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:web="{ns}">
+  <soapenv:Header/>
+  <soapenv:Body>
+    <web:listMedicinalProducts>
+      <filter>
+{register}        <medicinalProductName></medicinalProductName>
+        <innCode></innCode>
+      </filter>
+      <fromRow>{from_row}</fromRow>
+      <numberOfRows>{rows}</numberOfRows>
+    </web:listMedicinalProducts>
+  </soapenv:Body>
+</soapenv:Envelope>"""
 
 ENVELOPE = """<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope
@@ -49,6 +73,65 @@ def build_envelope(namespace: str, operation: str, value: str) -> bytes:
     body = ENVELOPE.format(ns=namespace, op=operation, arg=arg,
                            value=_escape(value))
     return body.encode("utf-8")
+
+
+def build_list_envelope(namespace: str, register_code: str | None,
+                        from_row: int, rows: int) -> bytes:
+    """listMedicinalProducts(filter, fromRow, numberOfRows).
+
+    `medicinalProductName` and `innCode` have no minOccurs in the XSD, so
+    they are sent empty rather than omitted. `registerCode` is nillable and
+    is left out entirely when not filtering, which searches every register.
+    Child elements are unqualified: the schema sets no elementFormDefault,
+    matching the runbook's verified call shape.
+    """
+    register = ""
+    if register_code:
+        register = f"        <registerCode>{_escape(register_code)}</registerCode>\n"
+    body = LIST_ENVELOPE.format(ns=namespace, register=register,
+                                from_row=int(from_row), rows=int(rows))
+    return body.encode("utf-8")
+
+
+def parse_list(body: bytes) -> dict:
+    """{'items': [...], 'all_results_count': int, 'fault': str|None}.
+
+    `allResultsCount` is the total matching the filter, not the page size --
+    it is what makes paging terminable without guessing.
+    """
+    root = ET.fromstring(body)
+    out: dict = {"items": [], "all_results_count": None}
+
+    for node in root.iter():
+        name = local(node.tag)
+        text = (node.text or "").strip()
+        if name.lower() == "faultstring" and text:
+            out["fault"] = text
+        elif name.lower() == "faultcode" and text:
+            out.setdefault("fault", text)
+        elif name == "allResultsCount" and text.isdigit():
+            out["all_results_count"] = int(text)
+
+    # The XSD names the repeating ELEMENT `medicinalProductListItemList`
+    # while its TYPE is `medicinalProductListItem`. Matching the type name
+    # finds nothing; both are accepted here so a future rename cannot
+    # silently return an empty page that looks like the end of the results.
+    for item in root.iter():
+        if local(item.tag) not in ("medicinalProductListItemList",
+                                   "medicinalProductListItem"):
+            continue
+        record: dict = {}
+        atc: list[str] = []
+        for child in item:
+            key, value = local(child.tag), (child.text or "").strip()
+            if key == "atcCodes":
+                if value:
+                    atc.append(value)
+            else:
+                record[key] = value
+        record["atcCodes"] = "|".join(atc)
+        out["items"].append(record)
+    return out
 
 
 def _escape(value: str) -> str:

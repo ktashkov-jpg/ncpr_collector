@@ -116,6 +116,8 @@ def main() -> int:
     sub.add_parser("operations",
                    help="list every operation the service advertises "
                         "(WSDL/XSD only — does not consume the daily cap)")
+    sub.add_parser("enumerate",
+                   help="see: python -m app.enumerate_catalogue --help")
     sub.add_parser("status", help="queue / counter / results summary")
     export = sub.add_parser("export", help="write the GTIN crosswalk CSV")
     export.add_argument("--out")
@@ -135,6 +137,10 @@ def main() -> int:
     if args.command == "collect":
         from app.collect import main as collect_main
         collect_main()
+        return 0
+    if args.command == "enumerate":
+        print("Run: python -m app.enumerate_catalogue --count-only\n"
+              "  (six requests, one per RegisterCode, reports allResultsCount)")
         return 0
     if args.command == "build-queue":
         print("Run: python -m app.queue_build --annex /data/Prilogenie-4.xlsx "
