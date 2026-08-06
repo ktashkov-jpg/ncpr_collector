@@ -1,0 +1,27 @@
+services:
+  ncpr-collector:
+    build:
+      context: .
+      args:
+        HOST_UID: ${HOST_UID:-1000}
+        HOST_GID: ${HOST_GID:-1000}
+    container_name: ncpr-collector
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    env_file:
+      - .env
+    environment:
+      NCPR_DATA_DIR: /data
+      HOME: /tmp/app-home
+    volumes:
+      - ${DATA_ROOT}:/data
+    network_mode: "host"
+    # restart: "no" is deliberate and load-bearing.
+    #
+    # The daily cap is enforced against a monitored, IP-allowlisted government
+    # service. An auto-restarting container would resume after a hard stop --
+    # exactly the situation (403/429) where a human must confirm allowlist
+    # status with NCPR before another request is sent. The collector also
+    # writes a HALTED file and refuses to start while it exists, so a restart
+    # policy here would fight a safety mechanism rather than help.
+    restart: "no"
+    command: ["python", "-m", "app.main", "collect"]

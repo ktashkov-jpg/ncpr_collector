@@ -1,0 +1,8 @@
+# Authored on Windows, runs on Linux (social2 / socialbertha). Normalise to
+# LF in the repo so a checkout on the target host is never CRLF-contaminated.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.xlsx binary
+*.sqlite3 binary

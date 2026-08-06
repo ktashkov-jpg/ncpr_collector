@@ -1,0 +1,29 @@
+# Local environment — .env.example is the committed template.
+# Nothing secret lives here (access is IP-allowlisted, not credentialed),
+# but .env carries host-specific paths and UIDs.
+.env
+
+# Collector state and harvest. Never commit: the raw XML archive is an
+# audit trail tied to one host and one snapshot date, and the SQLite file
+# holds the daily counter that enforces the rate cap.
+data/
+*.sqlite3
+*.sqlite3-journal
+raw/
+service.wsdl
+HALTED
+collector.lock
+*.csv
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

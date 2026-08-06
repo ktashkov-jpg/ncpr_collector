@@ -1,0 +1,18 @@
+# Keep the build context small and never bake state into the image.
+.git
+.gitignore
+.env
+data/
+raw/
+*.sqlite3
+service.wsdl
+HALTED
+collector.lock
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.vscode/
+.idea/
+.DS_Store
