@@ -94,6 +94,27 @@ def test_official_source_can_publish_a_bad_check_digit():
     assert not soap.valid_gtin("50085412959961")
 
 
+def test_expected_check_digit_is_diagnosed_not_applied():
+    """GS1's verifier gives 7, and 50085412959967 is registered to Baxter
+    International Inc. — the right company for that product. We record the
+    diagnosis; we never substitute the value."""
+    assert soap.expected_check_digit("50085412959961") == "7"
+    assert soap.valid_gtin("50085412959967")
+    # nothing in the library turns one into the other
+    assert soap.gtin14("50085412959961") == "50085412959961"
+
+
+def test_expected_check_digit_empty_when_value_is_valid():
+    assert soap.expected_check_digit("03800163730014") == ""
+    assert soap.expected_check_digit("55413760279461") == ""
+
+
+def test_indicator_digit_classification():
+    assert soap.indicator_digit("03800163730014") == "0"   # consumer unit
+    assert soap.indicator_digit("55413760279461") == "5"   # case/outer
+    assert soap.indicator_digit("3800163730014") == ""     # not a GTIN-14
+
+
 def test_zero_padded_gtin14_yields_the_consumer_barcode():
     gtin = "03800163730014"          # natid 69, live answer
     assert soap.valid_gtin(gtin)

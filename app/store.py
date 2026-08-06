@@ -39,8 +39,10 @@ CREATE TABLE IF NOT EXISTS product (
     medicinal_product_identifier TEXT,
     gtin_raw                     TEXT,   -- exactly as returned, TEXT
     gtin14                       TEXT,
-    ean13_derived                TEXT,
+    ean13_derived                TEXT,   -- only when indicator digit is 0
     checksum_valid               INTEGER,
+    expected_check_digit         TEXT,   -- diagnosis, never applied
+    indicator_digit              TEXT,   -- 0 = consumer unit; 1-8 = case/outer
     name_bg                      TEXT,
     name_en                      TEXT,
     authorization_number         TEXT,

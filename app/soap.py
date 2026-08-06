@@ -238,13 +238,42 @@ def ean13_from(value: str) -> str:
     return padded[1:] if padded.startswith("0") else ""
 
 
+def check_digit(body: str) -> str:
+    """GS1 modulo-10 check digit for a body (the value without its last digit)."""
+    total = 0
+    for position, char in enumerate(reversed(body), start=1):
+        total += int(char) * (3 if position % 2 else 1)
+    return str((10 - total % 10) % 10)
+
+
 def valid_gtin(value: str) -> bool:
     if not value.isdigit() or len(value) not in (8, 12, 13, 14):
         return False
-    total = 0
-    for position, char in enumerate(reversed(value[:-1]), start=1):
-        total += int(char) * (3 if position % 2 else 1)
-    return (10 - total % 10) % 10 == int(value[-1])
+    return check_digit(value[:-1]) == value[-1]
+
+
+def expected_check_digit(value: str) -> str:
+    """What the last digit should have been, for a structurally plausible but
+    invalid value. Recorded, never applied.
+
+    NCPR returned 50085412959961 for national id 758; the correct digit is 7,
+    and GS1's own registry resolves 50085412959967 to Baxter International
+    Inc. -- the right company for that product. So the true code is almost
+    certainly …967. It is still not written into `gtin`, because silently
+    substituting it would manufacture an identifier the source never supplied
+    and destroy the evidence that the register contains an error.
+    """
+    if not value.isdigit() or len(value) not in (8, 12, 13, 14):
+        return ""
+    expected = check_digit(value[:-1])
+    return "" if expected == value[-1] else expected
+
+
+def indicator_digit(value: str) -> str:
+    """Leading digit of a GTIN-14: '0' means a zero-padded GTIN-13 (the
+    consumer unit); '1'-'8' mean a higher packaging level (case/outer), which
+    will NOT be the barcode on a dispensed pack; '9' is variable measure."""
+    return value[0] if len(value) == 14 else ""
 
 
 def sha256(data: bytes) -> str:
