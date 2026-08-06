@@ -28,7 +28,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     config = Config()
     config.validate()
     print(f"endpoint     : {config.endpoint}")
-    print(f"data dir     : {config.data_dir}")
+    print(f"db dir       : {config.db_dir}")
+    print(f"archive dir  : {config.archive_dir}")
     print(f"delay        : {config.delay_min_s}-{config.delay_max_s}s")
     print(f"daily cap    : {config.daily_cap}")
     print(f"window       : {config.window_start_hour:02d}:00-"
@@ -90,8 +91,9 @@ def cmd_export(args: argparse.Namespace) -> int:
     turn 05712249101367 into 5.71225E+12 (HANDOVER §11)."""
     import csv
     config = Config()
+    config.ensure_dirs()
     store = Store(config.db_path)
-    out = args.out or f"{config.data_dir}/ncpr_gtin_crosswalk.csv"
+    out = args.out or config.export_path
     rows = store.db.execute(
         "SELECT medicinal_product_identifier, gtin_raw, gtin14, ean13_derived, "
         "checksum_valid, name_bg, name_en, authorization_number, final_pack, "

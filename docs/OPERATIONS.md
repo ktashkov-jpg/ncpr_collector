@@ -13,26 +13,45 @@ no file it interpolates to empty and fails with
 cp .env.example .env
 ```
 
-Set `DATA_ROOT` to an absolute path, and set `HOST_UID`/`HOST_GID` so files
-on the volume are owned by a real host identity:
+### Two storage roots
+
+| var | holds | put it on |
+|---|---|---|
+| `DB_ROOT` | SQLite, lock, `HALTED` | **local** ext4/xfs/zfs/btrfs |
+| `ARCHIVE_ROOT` | raw XML, exports, WSDL | anywhere — a shared folder is the point |
+
+`DB_ROOT` carries the daily counter that enforces the rate cap, and SQLite
+needs working POSIX locks. **Never put it on a CIFS/SMB mount** — a corrupted
+counter means uncontrolled request volume against an allowlisted service.
+A locally-mounted ZFS dataset is fine even if OMV re-exports it over SMB;
+what matters is how *this host* mounts it. Check before assuming:
 
 ```bash
-id -u && id -g
+findmnt -T /path/you/plan/to/use -o TARGET,SOURCE,FSTYPE,OPTIONS
 ```
 
-### If you are running as root
+`fstype` of `ext4`/`xfs`/`zfs`/`btrfs` is fine. `cifs` is not.
+`ARCHIVE_ROOT` defaults to `DB_ROOT` if you want a single path.
 
-Leave `HOST_UID=1000` / `HOST_GID=1000` and give the data directory to that
-identity — do **not** set them to `0`. The container drops to that uid, so
-a root-owned volume is unwritable:
+### Ownership
+
+The container drops to `HOST_UID:HOST_GID`, so **both** directories must be
+writable by that identity. On OMV a shared folder is usually `root:users`,
+and `users` is GID **100** on Debian — not 1000. Match what is actually
+there rather than guessing:
 
 ```bash
-mkdir -p /srv/ncpr-collector/data && chown -R 1000:1000 /srv/ncpr-collector/data
+ls -ln /path/to/shared/folder
 ```
 
-The image tolerates `HOST_UID=0` if you insist (it skips creating an account
-that already exists), but running the collector as root buys nothing and
-leaves root-owned files on the volume.
+Running as root does not change this: leave `HOST_UID=1000` and give the
+directories to that identity rather than setting `HOST_UID=0`. The image
+tolerates `0` (it skips creating an account that already exists), but
+running the collector as root buys nothing and leaves root-owned files.
+
+```bash
+mkdir -p /var/lib/ncpr-collector && chown -R 1000:100 /var/lib/ncpr-collector
+```
 
 ```bash
 docker compose build

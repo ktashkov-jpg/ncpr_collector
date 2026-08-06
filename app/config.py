@@ -45,26 +45,63 @@ class Config:
     # Disabling verification is opt-in and loudly logged.
     insecure_tls: bool = _str("NCPR_INSECURE_TLS", "0") == "1"
 
-    # --- paths (container volume) ---
+    # --- paths (container volumes) ---
+    #
+    # Two roots, because the two kinds of file want different storage:
+    #
+    #   db_dir       SQLite, lock file, HALTED marker. Small, write-heavy,
+    #                and it needs working POSIX locks -- this is the file
+    #                that holds the daily counter enforcing the rate cap,
+    #                so its integrity is a safety property, not bookkeeping.
+    #                Keep it on a local filesystem. Never on CIFS/SMB.
+    #
+    #   archive_dir  raw XML, exports, cached WSDL. Append-only, no locking,
+    #                and the part worth putting on a shared folder so it can
+    #                be read and copied without touching the collector.
+    #
+    # Both fall back to data_dir, so a single-path deployment is unchanged.
     data_dir: str = _str("NCPR_DATA_DIR", "/data")
+    db_dir_override: str = _str("NCPR_DB_DIR", "")
+    archive_dir_override: str = _str("NCPR_ARCHIVE_DIR", "")
+
+    @property
+    def db_dir(self) -> str:
+        return self.db_dir_override or self.data_dir
+
+    @property
+    def archive_dir(self) -> str:
+        return self.archive_dir_override or self.data_dir
 
     @property
     def db_path(self) -> str:
-        return os.path.join(self.data_dir, "ncpr.sqlite3")
+        return os.path.join(self.db_dir, "ncpr.sqlite3")
 
     @property
     def raw_dir(self) -> str:
-        return os.path.join(self.data_dir, "raw")
+        return os.path.join(self.archive_dir, "raw")
+
+    @property
+    def wsdl_path(self) -> str:
+        return os.path.join(self.archive_dir, "service.wsdl")
+
+    @property
+    def export_path(self) -> str:
+        return os.path.join(self.archive_dir, "ncpr_gtin_crosswalk.csv")
 
     @property
     def halt_file(self) -> str:
         """Written on a hard stop (403/429). Requires deliberate human
-        removal before the collector will run again — see collect.py."""
-        return os.path.join(self.data_dir, "HALTED")
+        removal before the collector will run again — see collect.py.
+        Lives with the database: it is operational state, not output."""
+        return os.path.join(self.db_dir, "HALTED")
 
     @property
     def lock_file(self) -> str:
-        return os.path.join(self.data_dir, "collector.lock")
+        return os.path.join(self.db_dir, "collector.lock")
+
+    def ensure_dirs(self) -> None:
+        for path in (self.db_dir, self.archive_dir, self.raw_dir):
+            os.makedirs(path, exist_ok=True)
 
     def validate(self) -> None:
         if self.delay_min_s > self.delay_max_s:

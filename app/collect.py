@@ -99,7 +99,7 @@ def cache_wsdl(config: Config, store: Store, opener) -> str:
     with opener.open(request, timeout=config.timeout_s) as response:
         body = response.read()
     digest = soap.sha256(body)
-    Path(config.data_dir, "service.wsdl").write_bytes(body)
+    Path(config.wsdl_path).write_bytes(body)
     store.set_meta("wsdl_sha256", digest)
     log(f"cached WSDL ({len(body)} bytes) sha256={digest[:16]}...")
     return digest
@@ -165,9 +165,12 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
 
+    config.ensure_dirs()
     store = Store(config.db_path)
     acquire_lock(config)
     try:
+        log(f"db      : {config.db_dir}")
+        log(f"archive : {config.archive_dir}")
         if config.insecure_tls:
             log("WARNING: TLS verification disabled (NCPR_INSECURE_TLS=1). "
                 "Fix the host CA store and turn this off.")

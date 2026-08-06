@@ -10,13 +10,23 @@ services:
     env_file:
       - .env
     environment:
-      NCPR_DATA_DIR: /data
+      NCPR_DB_DIR: /data
+      NCPR_ARCHIVE_DIR: /archive
       HOME: /tmp/app-home
     volumes:
-      # Defaulted so a fresh clone fails with a clear message rather than
-      # "invalid spec: :/data: empty section between colons", which is what
-      # an unset DATA_ROOT produces.
-      - ${DATA_ROOT:-./data}:/data
+      # Two roots on purpose.
+      #
+      # /data    SQLite + lock + HALTED. Keep on a LOCAL filesystem: this
+      #          file holds the daily counter that enforces the rate cap,
+      #          and SQLite needs working POSIX locks. Never put it on a
+      #          CIFS/SMB mount.
+      # /archive raw XML, exports, cached WSDL. Append-only, so a shared
+      #          folder is fine and makes the output readable and copyable
+      #          without touching the collector.
+      #
+      # ARCHIVE_ROOT falls back to DB_ROOT, so a single-path setup works.
+      - ${DB_ROOT:-./data}:/data
+      - ${ARCHIVE_ROOT:-${DB_ROOT:-./data}}:/archive
     network_mode: "host"
     # restart: "no" is deliberate and load-bearing.
     #
