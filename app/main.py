@@ -113,6 +113,9 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("doctor", help="check config, TLS, egress IP, WSDL")
+    sub.add_parser("operations",
+                   help="list every operation the service advertises "
+                        "(WSDL/XSD only — does not consume the daily cap)")
     sub.add_parser("status", help="queue / counter / results summary")
     export = sub.add_parser("export", help="write the GTIN crosswalk CSV")
     export.add_argument("--out")
@@ -122,6 +125,9 @@ def main() -> int:
     args = parser.parse_args()
     if args.command == "doctor":
         return cmd_doctor(args)
+    if args.command == "operations":
+        from app.wsdl import main as wsdl_main
+        return wsdl_main()
     if args.command == "status":
         return cmd_status(args)
     if args.command == "export":
