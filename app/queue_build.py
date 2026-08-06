@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -110,20 +111,55 @@ def load_reconstructed(path: Path) -> list[tuple[str, str]]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--annex", required=True, type=Path)
+    # Defaults point at the archive volume, not at the authoring machine.
+    # These were hardcoded Windows paths, which on the Linux host resolved to
+    # nothing and silently produced a queue with every task in the lowest
+    # band -- a plausible-looking 3,135 rows that would have run in exactly
+    # the wrong order for 40 days. Missing reference data now warns loudly.
     parser.add_argument("--drug-ref", type=Path,
-                        default=Path(r"C:\Projects\nhif-claims\bg-drug-registry"
-                                     r"\handover\app_bundle\drug_ref_min.csv"))
+                        default=Path(os.environ.get(
+                            "NCPR_DRUG_REF", "/archive/drug_ref_min.csv")))
     parser.add_argument("--salvia", type=Path,
-                        default=Path(r"C:\Projects\Tools\GS1_barcode\salvia_scrape"
-                                     r"\phase2_extract\salvia_products.csv"))
+                        default=Path(os.environ.get(
+                            "NCPR_SALVIA", "/archive/salvia_products.csv")))
     parser.add_argument("--contested", type=Path,
                         help="optional CSV with a reg_number column")
     parser.add_argument("--include-reverse", action="store_true",
                         help="queue reverse lookups for reconstructed GTINs")
+    parser.add_argument("--allow-missing-references", action="store_true",
+                        help="build an unordered queue even without drug_ref "
+                             "and salvia (not recommended)")
     args = parser.parse_args()
 
     config = Config()
+    config.ensure_dirs()
     store = Store(config.db_path)
+
+    # Priority ordering is the whole design of this queue: without the
+    # reference files every task collapses into the lowest band and the
+    # decisive answers arrive last. Refuse to build a silently-degraded
+    # queue -- 40 days is too long to spend running in the wrong order.
+    problems = []
+    if not args.drug_ref.exists():
+        problems.append(
+            f"drug_ref not found at {args.drug_ref}\n"
+            f"    Without it no reg_number group sizes are known, so band 20\n"
+            f"    (reg_number -> exactly one pfid) cannot be identified and\n"
+            f"    every task falls to band 40.")
+    if args.include_reverse and not args.salvia.exists():
+        problems.append(
+            f"--include-reverse given but salvia products not found at {args.salvia}\n"
+            f"    Band 10 validates reconstructed GTINs; it would be empty.")
+    if problems:
+        print("REFUSING TO BUILD A MIS-ORDERED QUEUE\n")
+        for problem in problems:
+            print(f"  * {problem}\n")
+        print("  Copy the reference files onto the archive volume, or pass\n"
+              "  --drug-ref / --salvia explicitly. To build an unordered queue\n"
+              "  deliberately, pass --allow-missing-references.")
+        if not args.allow_missing_references:
+            raise SystemExit(2)
+        print("  --allow-missing-references given; continuing unordered.\n")
 
     annex = read_annex(args.annex)
     active = [r for r in annex if r["status"] == ACTIVE]
@@ -166,6 +202,10 @@ def main() -> None:
     for band, count in sorted(added.items()):
         print(f"  {band:34} {count}")
     print(f"\nqueue now: {store.queue_stats()}")
+    if not any(band.startswith("20") for band in added):
+        print("\n  WARNING: band 20 is empty. Every task will run in the "
+              "lowest priority\n  band, so the most decisive answers arrive "
+              "last. Check --drug-ref.")
 
     per_day = config.daily_cap
     pending = store.queue_stats().get("pending", 0)
