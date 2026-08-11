@@ -116,6 +116,24 @@ collected:
 rm "$DB_ROOT/ncpr.sqlite3"
 ```
 
+## Build the pharmacist GUI catalogue
+
+This is separate from the collection queue. It prepares the searchable local
+catalogue without making SESPA product calls:
+
+```bash
+docker compose run --rm ncpr-collector python -m app.catalogue_build \
+  --annex /archive/input/Prilogenie-4-02-07-2026.xlsx \
+  --pim-sql /archive/input/database_backup.sql \
+  --atc-csv /archive/input/appendix1_active.csv \
+  --atc-csv /archive/input/appendix2_active.csv \
+  --check-only
+```
+
+A successful check reports zero issues. Re-run without `--check-only` to
+replace `local_catalogue` transactionally in the local SQLite database. The
+command refuses an incomplete replacement by default.
+
 ## Collect
 
 ```bash

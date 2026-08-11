@@ -2,6 +2,8 @@
 # matching the rest of GS1_barcode. openpyxl is needed only to read the
 # Annex 4 workbook when building the queue.
 openpyxl==3.1.5
+Flask==3.1.3
+gunicorn==23.0.0
 
 # Test-only. Kept in the image so a fresh clone can be verified on the target
 # host before the first live call is made.

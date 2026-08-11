@@ -93,6 +93,36 @@ docker compose run --rm ncpr-collector python -m app.main export
 See `docs/OPERATIONS.md` for the full sequence, ownership on OMV, and what
 to do when it halts.
 
+## Pharmacist GUI
+
+The private Flask web interface searches the local catalogue first by ATC,
+INN, trade name, or national identifier. Selecting a catalogue row only fills
+the product summary; an explicit confirmation then performs one audited SOAP
+lookup and places the normalized result into a pharmacist review table. Accepted
+results are exported in batches of 10, with a manual flush for a smaller final
+batch.
+
+The interface also exposes a separately guarded **Launch full scrape** control.
+It must reuse the existing collector and cannot bypass doctor checks, the daily
+cap, the single-instance lock, `HALTED`, or the requirement for written NCPR
+launch/rate confirmation. See `docs/GUI_WORKFLOW.md` for the complete workflow
+and persistence boundary.
+
+The searchable catalogue is built offline with `python -m app.catalogue_build`.
+It reconciles active Annex 4 packages with local PimChecker and official
+Appendix 1/2 ATC extracts by exact national identifier, and refuses to replace
+the SQLite catalogue if any required pharmacist-facing field is missing.
+
+After building the catalogue, set `NCPR_WEB_SECRET` in `.env` and start the
+private loopback-bound service:
+
+```bash
+docker compose up -d ncpr-web
+```
+
+Publish `127.0.0.1:6001` only through the deployment's existing reverse proxy
+and IP allowlist. Do not expose Gunicorn directly to the public internet.
+
 ## Queue priority — why it is not sequential
 
 At ~80 calls/day a full sweep takes about **40 days**, so the *order* decides

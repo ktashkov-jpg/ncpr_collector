@@ -101,6 +101,54 @@ CREATE TABLE IF NOT EXISTS catalogue (
     PRIMARY KEY (medicinal_product_identifier, register_code)
 );
 CREATE INDEX IF NOT EXISTS ix_catalogue_reg ON catalogue(register_code);
+
+-- Offline catalogue used by the pharmacist GUI. Annex 4 decides which rows
+-- are active and supplies the national/registration identifiers. The local
+-- PimChecker snapshot enriches ATC data without spending SESPA requests.
+CREATE TABLE IF NOT EXISTS local_catalogue (
+    national_id             TEXT PRIMARY KEY,
+    registration_number     TEXT NOT NULL,
+    trade_name              TEXT NOT NULL,
+    inn                     TEXT NOT NULL,
+    atc_codes               TEXT NOT NULL,
+    authorization_holder    TEXT,
+    product_description     TEXT NOT NULL,
+    atc_source              TEXT NOT NULL,
+    annex_snapshot          TEXT NOT NULL,
+    pim_snapshot            TEXT NOT NULL,
+    imported_at             TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_local_catalogue_registration
+    ON local_catalogue(registration_number);
+CREATE INDEX IF NOT EXISTS ix_local_catalogue_trade
+    ON local_catalogue(trade_name);
+CREATE INDEX IF NOT EXISTS ix_local_catalogue_inn
+    ON local_catalogue(inn);
+CREATE INDEX IF NOT EXISTS ix_local_catalogue_atc
+    ON local_catalogue(atc_codes);
+
+CREATE TABLE IF NOT EXISTS local_catalogue_issue (
+    national_id     TEXT NOT NULL,
+    field           TEXT NOT NULL,
+    reason          TEXT NOT NULL,
+    candidates      TEXT,
+    PRIMARY KEY (national_id, field)
+);
+
+-- Human decisions made in the pharmacist GUI. product_rowid points at the
+-- immutable normalized SOAP result; rejected rows remain auditable.
+CREATE TABLE IF NOT EXISTS review_item (
+    review_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_rowid  INTEGER NOT NULL UNIQUE,
+    national_id    TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'pending'
+                   CHECK(status IN ('pending', 'accepted', 'rejected')),
+    created_at     TEXT NOT NULL,
+    decided_at     TEXT,
+    exported_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_review_item_status
+    ON review_item(status, exported_at, review_id);
 """
 
 

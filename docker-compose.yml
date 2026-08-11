@@ -1,4 +1,25 @@
 services:
+  ncpr-web:
+    build:
+      context: .
+      args:
+        HOST_UID: ${HOST_UID:-1000}
+        HOST_GID: ${HOST_GID:-1000}
+    container_name: ncpr-web
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    env_file:
+      - .env
+    environment:
+      NCPR_DB_DIR: /data
+      NCPR_ARCHIVE_DIR: /archive
+      HOME: /tmp/app-home
+    volumes:
+      - ${DB_ROOT:-./data}:/data
+      - ${ARCHIVE_ROOT:-${DB_ROOT:-./data}}:/archive
+    network_mode: "host"
+    restart: unless-stopped
+    command: ["gunicorn", "--bind", "127.0.0.1:6001", "--workers", "1", "app.web:create_app()"]
+
   ncpr-collector:
     build:
       context: .

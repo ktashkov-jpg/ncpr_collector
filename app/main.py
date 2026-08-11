@@ -118,6 +118,9 @@ def main() -> int:
                         "(WSDL/XSD only — does not consume the daily cap)")
     sub.add_parser("enumerate",
                    help="see: python -m app.enumerate_catalogue --help")
+    sub.add_parser("catalogue-build",
+                   help="see: python -m app.catalogue_build --help "
+                        "(offline Annex + PimChecker reconciliation)")
     sub.add_parser("fetch-register",
                    help="see: python -m app.fetch_register --help "
                         "(download the current workbook by URL convention)")
@@ -154,6 +157,11 @@ def main() -> int:
     if args.command == "enumerate":
         print("Run: python -m app.enumerate_catalogue --count-only\n"
               "  (six requests, one per RegisterCode, reports allResultsCount)")
+        return 0
+    if args.command == "catalogue-build":
+        print("Run: python -m app.catalogue_build --annex <Annex-4.xlsx> "
+              "--pim-sql <database_backup.sql> "
+              "[--atc-csv <appendix-active.csv>] [--check-only]")
         return 0
     if args.command == "build-queue":
         print("Run: python -m app.queue_build --annex /data/Prilogenie-4.xlsx "

@@ -63,6 +63,7 @@ class Config:
     data_dir: str = _str("NCPR_DATA_DIR", "/data")
     db_dir_override: str = _str("NCPR_DB_DIR", "")
     archive_dir_override: str = _str("NCPR_ARCHIVE_DIR", "")
+    bulk_approved: bool = _str("NCPR_BULK_APPROVED", "0") == "1"
 
     @property
     def db_dir(self) -> str:
@@ -94,6 +95,10 @@ class Config:
     @property
     def export_path(self) -> str:
         return os.path.join(self.archive_dir, "ncpr_gtin_crosswalk.csv")
+
+    @property
+    def confirmed_export_path(self) -> str:
+        return os.path.join(self.archive_dir, "ncpr_gtin_confirmed.csv")
 
     @property
     def halt_file(self) -> str:

@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NCPR · GTIN verification</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+  <!--
+  THESIS: A quiet dispensary ledger makes source identity and operator decisions unmistakable.
+  OWN-WORLD: Cool paper, navy ink, teal verification marks, fine rules, compact tabular rhythm.
+  STORY: Find locally; choose the exact package; spend one request; review; publish confirmed rows.
+  FIRST VIEWPORT: Search controls, selected-product evidence, request action, operational limits, review table.
+  FORM: Dispensary Ledger; grounded direction 4; seed 9b81547d.
+  FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+  -->
+  <header class="masthead">
+    <a class="identity" href="/" aria-label="NCPR GTIN verification home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M6 3.5h17.5L26 6v22.5H6zM10 10h12M10 15h12M10 20h7"/></svg>
+      <span><strong>NCPR</strong><small>GTIN verification ledger</small></span>
+    </a>
+    <div class="service-state" data-status-state>
+      <span class="state-dot" aria-hidden="true"></span>
+      <span data-status-label>Local catalogue ready</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="status-strip" aria-label="Operational status">
+      <div><span>Local catalogue</span><strong data-catalogue-count>{{ status.catalogue_rows }}</strong></div>
+      <div><span>Requests today</span><strong><b data-used>{{ status.requests_used }}</b> / {{ status.daily_cap }}</strong></div>
+      <div><span>Review queue</span><strong data-pending>{{ status.pending_reviews }}</strong></div>
+      <div><span>Confirmed batch</span><strong><b data-staged>{{ status.staged }}</b> / 10</strong></div>
+      <button class="quiet-button bulk-control" type="button" disabled title="Written NCPR launch approval has not been recorded">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 3.5h5v4h2.5v9H5v-9h2.5zm1 4h3v-3h-3z"/></svg>
+        Launch full scrape · locked
+      </button>
+    </section>
+
+    <section class="workspace" aria-labelledby="search-title">
+      <div class="workspace-heading">
+        <div>
+          <h1 id="search-title">Identify a medicinal product</h1>
+          <p>Catalogue search is local. No SESPA request is made until you confirm one National ID.</p>
+        </div>
+        <span class="local-marker">LOCAL</span>
+      </div>
+
+      <form id="search-form" autocomplete="off">
+        <div class="search-grid">
+          {% for field, label, hint in [
+            ('national_id', 'National ID', 'e.g. 758'),
+            ('registration_number', 'Approval number', 'Select approval'),
+            ('trade_name', 'Trade name', 'Start typing a name'),
+            ('atc', 'ATC', 'e.g. A10BA02'),
+            ('inn', 'INN', 'Start typing an ingredient')
+          ] %}
+          <label class="field" data-combobox="{{ field }}">
+            <span>{{ label }}</span>
+            <span class="input-shell">
+              <input name="{{ field }}" placeholder="{{ hint }}" role="combobox"
+                     aria-autocomplete="list" aria-expanded="false"
+                     aria-controls="{{ field }}-options">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg>
+            </span>
+            <span class="options" id="{{ field }}-options" role="listbox" hidden></span>
+          </label>
+          {% endfor %}
+        </div>
+        <div class="search-actions">
+          <button type="button" class="text-button" data-clear>Clear all</button>
+          <span data-match-count>Choose any field to search 3,135 catalogue rows.</span>
+        </div>
+      </form>
+
+      <div class="catalogue-results" aria-live="polite">
+        <div class="empty-search" data-empty-search>
+          <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="14" cy="14" r="8"/><path d="m20 20 7 7M10 14h8"/></svg>
+          <p>Begin with a National ID, approval number, trade name, ATC or INN.</p>
+        </div>
+        <div class="table-wrap" data-results-wrap hidden>
+          <table>
+            <thead><tr><th>National ID</th><th>Approval no.</th><th>Trade name</th><th>ATC</th><th>INN</th><th><span class="sr-only">Select</span></th></tr></thead>
+            <tbody data-results></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="selection" aria-labelledby="selected-title" data-selection hidden>
+      <div class="selection-copy">
+        <h2 id="selected-title">Selected package</h2>
+        <strong data-selected-name></strong>
+        <dl>
+          <div><dt>National ID</dt><dd data-selected-id></dd></div>
+          <div><dt>Approval no.</dt><dd data-selected-reg></dd></div>
+          <div><dt>ATC</dt><dd data-selected-atc></dd></div>
+          <div><dt>INN</dt><dd data-selected-inn></dd></div>
+          <div class="description"><dt>Package</dt><dd data-selected-pack></dd></div>
+        </dl>
+      </div>
+      <div class="request-panel">
+        <p>One audited SOAP request will be counted before it is sent.</p>
+        <button class="primary-button" type="button" data-lookup>
+          Request GTIN for <span data-button-id></span>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11M11 6l4 4-4 4"/></svg>
+        </button>
+        <span class="request-message" data-request-message role="status"></span>
+      </div>
+    </section>
+
+    <section class="review" aria-labelledby="review-title">
+      <div class="section-heading">
+        <div><h2 id="review-title">Package review</h2><p>Accept only the exact package intended for export.</p></div>
+        <button class="quiet-button" type="button" data-export disabled>Export confirmed now</button>
+      </div>
+      <div class="empty-review" data-empty-review>
+        <span data-review-empty-copy>No SOAP results are awaiting review.</span>
+        <button class="text-button" type="button" data-review-retry hidden>Retry</button>
+      </div>
+      <div class="table-wrap" data-review-wrap hidden>
+        <table class="review-table">
+          <thead><tr><th>Product</th><th>Identifiers</th><th>Authorization</th><th>Pack</th><th>GTIN</th><th>Decision</th></tr></thead>
+          <tbody data-reviews></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <template id="result-row"><tr><td data-cell="national_id"></td><td data-cell="registration_number"></td><td data-cell="trade_name"></td><td data-cell="atc_codes"></td><td data-cell="inn"></td><td><button class="row-button" type="button">Select</button></td></tr></template>
+  <script>window.NCPR = { csrf: {{ csrf_token|tojson }} };</script>
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</body>
+</html>
