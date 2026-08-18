@@ -32,10 +32,17 @@
       <div><span>Requests today</span><strong><b data-used>{{ status.requests_used }}</b> / {{ status.daily_cap }}</strong></div>
       <div><span>Review queue</span><strong data-pending>{{ status.pending_reviews }}</strong></div>
       <div><span>Confirmed batch</span><strong><b data-staged>{{ status.staged }}</b> / 10</strong></div>
-      <button class="quiet-button bulk-control" type="button" disabled title="Written NCPR launch approval has not been recorded">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 3.5h5v4h2.5v9H5v-9h2.5zm1 4h3v-3h-3z"/></svg>
-        Launch full scrape · locked
-      </button>
+      <div class="bulk-control"><span>Bulk state</span><strong data-bulk-state>{{ status.bulk.state }}</strong></div>
+    </section>
+
+    <section class="operations-bar" aria-label="Exports and bulk collection">
+      <div><strong>Collected data</strong><span><b data-collected>{{ status.collected_rows }}</b> stored GTIN rows</span></div>
+      <div class="operation-actions">
+        <button class="quiet-button download-button" type="button" data-download-all><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9m-4-3 4 4 4-4M4 16h12"/></svg>Export all collected CSV</button>
+        <button class="quiet-button bulk-start" type="button" data-bulk-start><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 5 7 5-7 5z"/></svg>Start bulk export</button>
+        <button class="quiet-button bulk-stop" type="button" data-bulk-stop hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 6h8v8H6z"/></svg>Stop bulk export</button>
+      </div>
+      <p class="operation-message" data-operation-message role="status"></p>
     </section>
 
     <section class="workspace" aria-labelledby="search-title">
@@ -51,7 +58,7 @@
         <div class="search-grid">
           {% for field, label, hint in [
             ('national_id', 'National ID', 'e.g. 758'),
-            ('registration_number', 'Approval number', 'Select approval'),
+            ('registration_number', 'BDA / approval number', 'Type any BDA number'),
             ('trade_name', 'Trade name', 'Start typing a name'),
             ('atc', 'ATC', 'e.g. A10BA02'),
             ('inn', 'INN', 'Start typing an ingredient')
@@ -70,14 +77,14 @@
         </div>
         <div class="search-actions">
           <button type="button" class="text-button" data-clear>Clear all</button>
-          <span data-match-count>Choose any field to search 3,135 catalogue rows.</span>
+          <span data-match-count>Search the complete local catalogue.</span>
         </div>
       </form>
 
       <div class="catalogue-results" aria-live="polite">
         <div class="empty-search" data-empty-search>
           <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="14" cy="14" r="8"/><path d="m20 20 7 7M10 14h8"/></svg>
-          <p>Begin with a National ID, approval number, trade name, ATC or INN.</p>
+          <p>Begin with any National ID, BDA number, trade name, ATC or INN.</p>
         </div>
         <div class="table-wrap" data-results-wrap hidden>
           <table>
@@ -127,6 +134,24 @@
       </div>
     </section>
   </main>
+
+  <dialog class="bulk-dialog" data-bulk-dialog aria-labelledby="bulk-dialog-title">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div><h2 id="bulk-dialog-title">Confirm bulk SOAP collection</h2><p>This starts the existing rate-limited collector. Progress and queue state are stored in SQLite.</p></div>
+        <button class="dialog-close" value="cancel" aria-label="Close confirmation">Close</button>
+      </div>
+      <dl class="bulk-facts">
+        <div><dt>Pending requests</dt><dd data-bulk-pending>0</dd></div>
+        <div><dt>Requests used today</dt><dd data-bulk-used>0</dd></div>
+        <div><dt>Daily cap</dt><dd data-bulk-cap>0</dd></div>
+        <div><dt>Estimated minimum</dt><dd data-bulk-days>—</dd></div>
+      </dl>
+      <label class="confirm-check"><input type="checkbox" data-bulk-confirm><span>I reviewed the request count and confirm written NCPR bulk/rate approval is on file.</span></label>
+      <p class="dialog-warning">Stopping preserves completed results and remaining queue items. It does not undo requests already sent.</p>
+      <div class="dialog-actions"><button class="quiet-button" value="cancel">Cancel</button><button class="primary-button" type="button" data-bulk-confirm-start disabled>Start <span data-bulk-confirm-count>0</span> requests</button></div>
+    </form>
+  </dialog>
 
   <template id="result-row"><tr><td data-cell="national_id"></td><td data-cell="registration_number"></td><td data-cell="trade_name"></td><td data-cell="atc_codes"></td><td data-cell="inn"></td><td><button class="row-button" type="button">Select</button></td></tr></template>
   <script>window.NCPR = { csrf: {{ csrf_token|tojson }} };</script>

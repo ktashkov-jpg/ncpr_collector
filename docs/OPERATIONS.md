@@ -118,21 +118,25 @@ rm "$DB_ROOT/ncpr.sqlite3"
 
 ## Build the pharmacist GUI catalogue
 
-This is separate from the collection queue. It prepares the searchable local
-catalogue without making SESPA product calls:
+This is separate from the collection queue and makes no SESPA product calls.
+The authoritative full source is `sources/ncpr/clean/ncpr_all_reimb_clean.csv`.
+Only its currently active rows are imported; active Appendix 1 products receive
+the highest search priority. PimChecker remains the ATC fallback for products
+outside Appendix 1.
 
 ```bash
 docker compose run --rm ncpr-collector python -m app.catalogue_build \
-  --annex /archive/input/Prilogenie-4-02-07-2026.xlsx \
+  --catalogue-csv /archive/input/ncpr_all_reimb_clean.csv \
+  --priority-appendix /archive/input/ncpr_annex_clean.csv \
   --pim-sql /archive/input/database_backup.sql \
-  --atc-csv /archive/input/appendix1_active.csv \
-  --atc-csv /archive/input/appendix2_active.csv \
   --check-only
 ```
 
-A successful check reports zero issues. Re-run without `--check-only` to
-replace `local_catalogue` transactionally in the local SQLite database. The
-command refuses an incomplete replacement by default.
+A successful check reports zero issues and the counts for all source rows,
+active catalogue rows, and Appendix 1 priority rows. Re-run without
+`--check-only` to replace `local_catalogue` transactionally. The legacy
+`--annex` mode remains available for reproducibility, but it is no longer the
+production catalogue source.
 
 ## Collect
 
@@ -143,6 +147,16 @@ docker compose up -d ncpr-collector
 ```bash
 docker compose logs -f ncpr-collector
 ```
+
+## Audit trail
+
+Each manual lookup and collector result creates a compact SQLite `audit_event`
+record with timestamp, operation, product identifier, SOAP action, outcome,
+HTTP status, and whether local data changed. It never stores credentials or raw
+SOAP payloads; raw responses remain in the archive volume. If Pangolin/Newt is
+configured to strip and set `X-Forwarded-User` after authentication, set
+`NCPR_TRUST_PROXY_IDENTITY=1` to retain that actor in audit records. Leave it
+at `0` otherwise.
 
 ```bash
 docker compose run --rm ncpr-collector python -m app.main status
@@ -163,6 +177,15 @@ docker compose run --rm ncpr-collector python -m app.main export
 
 Writes `$ARCHIVE_ROOT/ncpr_gtin_crosswalk.csv` with **every field quoted**, so
 a spreadsheet cannot turn `05712249101367` into `5.71225E+12`.
+
+The web UI also provides **Export all collected CSV**. That CSRF-protected
+download contains all rows currently stored in `product` and goes to the
+operator browser's Downloads folder. It does not mark review rows exported.
+
+When `NCPR_BULK_APPROVED=1`, **Start bulk export** launches the same collector
+after an explicit pending-count confirmation. **Stop bulk export** requests a
+cooperative stop. Do not remove the SQLite database between runs: it is the
+persistent memory that prevents completed queue items from being repeated.
 
 ## If it halts
 

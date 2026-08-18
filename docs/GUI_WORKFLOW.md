@@ -76,20 +76,20 @@ SESPA product operations.
 
 Required sources:
 
-- the current Annex 4 workbook for active status, national ID, registration
-  number, INN, and the complete product/package description;
+- `sources/ncpr/clean/ncpr_all_reimb_clean.csv` for the complete reimbursed
+  catalogue; only rows marked currently active are loaded into the operator UI;
+- `sources/ncpr/clean/ncpr_annex_clean.csv` to rank active Appendix 1 products
+  ahead of the rest of the catalogue;
 - a local PimChecker PostgreSQL backup for additional ATC and authorization
   holder coverage;
-- official pre-extracted Appendix 1/2 CSVs with `national_id` and `atc` columns.
 
 Run a strict check before replacing the catalogue:
 
 ```bash
 python -m app.catalogue_build \
-  --annex /archive/input/Prilogenie-4-02-07-2026.xlsx \
+  --catalogue-csv /archive/input/ncpr_all_reimb_clean.csv \
+  --priority-appendix /archive/input/ncpr_annex_clean.csv \
   --pim-sql /archive/input/database_backup.sql \
-  --atc-csv /archive/input/appendix1_active.csv \
-  --atc-csv /archive/input/appendix2_active.csv \
   --check-only
 ```
 
@@ -107,6 +107,18 @@ and never guessed.
 
 The GUI includes **Launch full scrape**, visually separated from individual
 lookup actions. It is an operational control, not the primary call to action.
+
+The implemented controls are labelled **Start bulk export** and **Stop bulk
+export**. Start launches the existing collector process only after displaying
+and reconfirming the current pending count. Stop writes a cooperative marker;
+the collector finishes any in-flight HTTP call, interrupts its wait, and exits.
+Queue rows, completed results, the daily counter, and the last bulk-run state
+remain in SQLite, so a later start resumes pending work rather than rebuilding
+or replaying completed work.
+
+**Export all collected CSV** is separate and read-only: it downloads every
+stored normalized product row through the browser without changing review or
+queue state.
 
 Before launch, show a confirmation dialog containing:
 

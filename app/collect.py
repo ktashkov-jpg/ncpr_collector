@@ -121,6 +121,9 @@ def handle(store: Store, config: Config, task, body: bytes,
     if parsed.get("fault"):
         # Runbook §10: record and continue on the normal schedule.
         store.finish(task["task_id"], "fault", parsed["fault"])
+        store.audit("bulk_collect", "soap_fault", product_id=task["key"],
+                    soap_action=task["kind"], http_status=http_status,
+                    detail=parsed["fault"][:300])
         log(f"  SOAP fault: {parsed['fault'][:80]}")
         return
 
@@ -129,6 +132,8 @@ def handle(store: Store, config: Config, task, body: bytes,
         # Normal for non-PLS packages -- SESPA holds GTINs only for the
         # Positive Drug List. Not an error, and not worth a retry.
         store.finish(task["task_id"], "no_gtin")
+        store.audit("bulk_collect", "no_gtin", product_id=task["key"],
+                    soap_action=task["kind"], http_status=http_status)
         log("  no GTIN (expected for non-PLS packages)")
         return
 
@@ -151,11 +156,16 @@ def handle(store: Store, config: Config, task, body: bytes,
             raw_sha256=soap.sha256(body),
         )
     store.finish(task["task_id"], "done")
+    store.audit("bulk_collect", "success", product_id=task["key"],
+                soap_action=task["kind"], http_status=http_status,
+                local_modified=True)
     log(f"  {len(gtins)} GTIN(s): {', '.join(gtins)}  "
         f"{(parsed.get('name_en') or parsed.get('name_bg') or '')[:36]}")
 
 
 def main() -> None:
+    global RUNNING
+    RUNNING = True
     config = Config()
     config.validate()
     if Path(config.halt_file).exists():
@@ -170,7 +180,9 @@ def main() -> None:
     config.ensure_dirs()
     store = Store(config.db_path)
     acquire_lock(config)
+    final_state = "stopped"
     try:
+        store.set_bulk_state("running", pid=os.getpid())
         log(f"db      : {config.db_dir}")
         log(f"archive : {config.archive_dir}")
         if config.insecure_tls:
@@ -186,23 +198,27 @@ def main() -> None:
         log(f"queue: {store.queue_stats()}")
 
         while RUNNING:
+            if Path(config.stop_file).exists():
+                log("operator stop requested - preserving queue and exiting")
+                break
             day = today(config)
             used = store.used_today(day)
             if used >= config.daily_cap:
                 wait = seconds_until_window(config)
                 log(f"daily cap reached ({used}/{config.daily_cap}); "
                     f"sleeping {wait // 3600}h until the next window")
-                _sleep(wait)
+                _sleep(wait, config)
                 continue
             if not in_window(config):
                 wait = seconds_until_window(config)
                 log(f"outside operating window; sleeping {wait // 3600}h {wait % 3600 // 60}m")
-                _sleep(wait)
+                _sleep(wait, config)
                 continue
 
             task = store.next_task()
             if task is None:
                 log("queue empty - nothing pending. Exiting.")
+                final_state = "completed"
                 break
 
             operation = soap.FORWARD if task["kind"] == "forward" else soap.REVERSE
@@ -218,38 +234,46 @@ def main() -> None:
                 handle(store, config, task, body, status, elapsed, wsdl_hash)
             except soap.HardStop as exc:
                 store.defer(task["task_id"], str(exc))
+                store.audit("bulk_collect", "hard_stop", product_id=task["key"],
+                            soap_action=task["kind"], detail=str(exc))
                 halt(config, store, str(exc))
+                final_state = "halted"
                 break
             except soap.Transient as exc:
                 consecutive_5xx += 1
                 store.defer(task["task_id"], str(exc))
                 store.log(task_id=task["task_id"], note=f"transient: {exc}")
+                store.audit("bulk_collect", "transient_failure", product_id=task["key"],
+                            soap_action=task["kind"], detail=type(exc).__name__)
                 # Runbook §10: 30 min, then 2 h, then stop for the day.
                 if consecutive_5xx == 1:
                     log(f"  transient ({exc}); waiting 30 min")
-                    _sleep(30 * 60)
+                    _sleep(30 * 60, config)
                 elif consecutive_5xx == 2:
                     log(f"  transient ({exc}); waiting 2 h")
-                    _sleep(2 * 3600)
+                    _sleep(2 * 3600, config)
                 else:
                     log(f"  third consecutive failure ({exc}); stopping for today")
-                    _sleep(seconds_until_window(config))
+                    _sleep(seconds_until_window(config), config)
                     consecutive_5xx = 0
                 continue
 
             delay = random.randint(config.delay_min_s, config.delay_max_s)
             log(f"  sleeping {delay}s")
-            _sleep(delay)
+            _sleep(delay, config)
 
         log(f"final queue state: {store.queue_stats()}")
     finally:
         release_lock(config)
+        Path(config.stop_file).unlink(missing_ok=True)
+        store.set_bulk_state(final_state, note="queue state preserved")
 
 
-def _sleep(seconds: int) -> None:
+def _sleep(seconds: int, config: Config | None = None) -> None:
     """Interruptible sleep so SIGTERM does not wait out a 10-minute delay."""
     end = time.time() + seconds
-    while RUNNING and time.time() < end:
+    while (RUNNING and time.time() < end and
+           not (config and Path(config.stop_file).exists())):
         time.sleep(min(5, max(0, end - time.time())))
 
 

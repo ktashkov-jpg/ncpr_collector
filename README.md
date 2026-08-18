@@ -109,9 +109,11 @@ launch/rate confirmation. See `docs/GUI_WORKFLOW.md` for the complete workflow
 and persistence boundary.
 
 The searchable catalogue is built offline with `python -m app.catalogue_build`.
-It reconciles active Annex 4 packages with local PimChecker and official
-Appendix 1/2 ATC extracts by exact national identifier, and refuses to replace
-the SQLite catalogue if any required pharmacist-facing field is missing.
+Its full source is `sources/ncpr/clean/ncpr_all_reimb_clean.csv`; the importer
+loads its current active rows and ranks active Appendix 1 products first using
+`ncpr_annex_clean.csv`. Local PimChecker supplies ATC fallback coverage. The
+importer refuses to replace SQLite if a required pharmacist-facing field is
+missing.
 
 After building the catalogue, set `NCPR_WEB_SECRET` in `.env` and start the
 private loopback-bound service:

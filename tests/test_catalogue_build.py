@@ -3,7 +3,7 @@ from pathlib import Path
 
 from openpyxl import Workbook
 
-from app.catalogue_build import read_pim_products, reconcile
+from app.catalogue_build import read_pim_products, reconcile, reconcile_full_catalogue
 from app.queue_build import ACTIVE
 
 
@@ -107,3 +107,33 @@ def test_official_atc_csv_has_priority(tmp_path):
     assert not issues
     assert records[0]["atc_codes"] == "A02BC02"
     assert records[0]["atc_source"] == "official_appendix:national_id"
+
+
+def test_full_catalogue_imports_active_rows_and_prioritizes_appendix1(tmp_path):
+    catalogue = tmp_path / "ncpr_all_reimb_clean.csv"
+    appendix = tmp_path / "ncpr_annex_clean.csv"
+    dump = tmp_path / "pim.sql"
+    catalogue.write_text(
+        "national_num,reg_number,product_name,form,strength_full,pack_size,pack_text,"
+        "inn,mah,status_active\n"
+        "100,REG-100,Priority drug,Tablet,10 mg,30,,Example INN,Holder,True\n"
+        "200,REG-200,Other drug,Capsule,20 mg,20,,Other INN,Holder,True\n"
+        "300,REG-300,Historical drug,Tablet,5 mg,10,,Old INN,Holder,False\n",
+        encoding="utf-8-sig",
+    )
+    appendix.write_text(
+        "national_num,annex,atc_code,atc_all,mah,status\n"
+        f"100,1,A01AA01,A01AA01,Holder,{ACTIVE}\n"
+        f"200,2,B02BB02,B02BB02,Holder,{ACTIVE}\n",
+        encoding="utf-8-sig",
+    )
+    write_pim_dump(dump, [pim_row("100", "A01AA01", "Example INN"),
+                          pim_row("200", "B02BB02", "Other INN")])
+    records, issues, stats = reconcile_full_catalogue(catalogue, appendix, dump)
+    assert not issues
+    assert [record["national_id"] for record in records] == ["100", "200"]
+    assert records[0]["priority_rank"] == 10
+    assert records[1]["priority_rank"] == 100
+    assert stats["source_rows"] == 3
+    assert stats["active_catalogue_rows"] == 2
+    assert stats["appendix1_priority_rows"] == 1

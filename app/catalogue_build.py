@@ -139,6 +139,111 @@ def read_atc_references(paths: list[Path]) -> tuple[dict[str, set[str]], dict[st
     return atc_by_national, holder_by_national
 
 
+def read_priority_appendix(path: Path) -> tuple[dict[str, set[str]], dict[str, str]]:
+    """Read active Appendix 1 rows from ncpr_annex_clean.csv."""
+    atc: dict[str, set[str]] = defaultdict(set)
+    holders: dict[str, str] = {}
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            if clean(row.get("annex")) != "1" or clean(row.get("status")) != ACTIVE:
+                continue
+            national_id = norm_id(row.get("national_num"))
+            if not national_id.isdigit():
+                continue
+            atc[national_id].update(split_atc(row.get("atc_all") or row.get("atc_code") or ""))
+            if clean(row.get("mah")):
+                holders.setdefault(national_id, clean(row.get("mah")))
+    return atc, holders
+
+
+def reconcile_full_catalogue(catalogue_path: Path, priority_appendix_path: Path,
+                             pim_path: Path) -> tuple[list[dict], list[dict], dict]:
+    """Build the current catalogue from ncpr_all_reimb_clean.csv.
+
+    Historical rows remain in the source file; the operator UI intentionally
+    imports only status_active rows. In this source those have unique national
+    identifiers, which preserves the SOAP lookup contract.
+    """
+    pim_products = read_pim_products(pim_path)
+    by_national: dict[str, list[PimProduct]] = defaultdict(list)
+    atc_by_inn: dict[str, set[str]] = defaultdict(set)
+    for product in pim_products:
+        by_national[product.national_id].append(product)
+        if product.inn:
+            atc_by_inn[norm_text(product.inn)].update(product.atc_codes)
+    appendix_atc, appendix_holders = read_priority_appendix(priority_appendix_path)
+
+    records, issues = [], []
+    imported_at = dt.datetime.now(dt.timezone.utc).isoformat()
+    seen: set[str] = set()
+    with catalogue_path.open(encoding="utf-8-sig", newline="") as handle:
+        source_rows = list(csv.DictReader(handle))
+    active_rows = [row for row in source_rows
+                   if clean(row.get("status_active")).casefold() == "true"]
+    for source in active_rows:
+        national_id = norm_id(source.get("national_num"))
+        if not national_id.isdigit():
+            issues.append({"national_id": national_id, "field": "national_id",
+                           "reason": "active source row has invalid national number",
+                           "candidates": ""})
+            continue
+        if national_id in seen:
+            issues.append({"national_id": national_id, "field": "national_id",
+                           "reason": "duplicate active national number",
+                           "candidates": ""})
+            continue
+        seen.add(national_id)
+        matches = by_national.get(national_id, [])
+        exact_atc = set().union(*(p.atc_codes for p in matches)) if matches else set()
+        if appendix_atc.get(national_id):
+            atc_codes, atc_source = appendix_atc[national_id], "appendix1:national_id"
+        elif exact_atc:
+            atc_codes, atc_source = exact_atc, "pim:national_id"
+        else:
+            candidates = atc_by_inn.get(norm_text(clean(source.get("inn"))), set())
+            atc_codes = set(candidates) if len(candidates) == 1 else set()
+            atc_source = "pim:unique_inn" if atc_codes else "unresolved"
+            if not atc_codes:
+                issues.append({"national_id": national_id, "field": "atc_codes",
+                               "reason": "no unambiguous ATC candidate",
+                               "candidates": "|".join(sorted(candidates))})
+        holders = sorted({p.authorization_holder for p in matches if p.authorization_holder})
+        if not holders and appendix_holders.get(national_id):
+            holders = [appendix_holders[national_id]]
+        elif not holders and clean(source.get("mah")):
+            holders = [clean(source.get("mah"))]
+        description = ", ".join(part for part in (
+            clean(source.get("product_name")), clean(source.get("form")),
+            clean(source.get("strength_full")),
+            f"Pack: {clean(source.get('pack_size'))}" if clean(source.get("pack_size")) else "",
+            clean(source.get("pack_text"))) if part)
+        record = {
+            "national_id": national_id,
+            "registration_number": clean(source.get("reg_number")),
+            "trade_name": clean(source.get("product_name")),
+            "inn": clean(source.get("inn")),
+            "atc_codes": "|".join(sorted(atc_codes)),
+            "authorization_holder": " | ".join(holders),
+            "product_description": description,
+            "atc_source": atc_source,
+            "annex_snapshot": priority_appendix_path.name,
+            "pim_snapshot": pim_path.name,
+            "imported_at": imported_at,
+            "priority_rank": 10 if national_id in appendix_atc else 100,
+        }
+        for field in REQUIRED_FIELDS:
+            if not record[field] and not any(i["national_id"] == national_id and
+                                             i["field"] == field for i in issues):
+                issues.append({"national_id": national_id, "field": field,
+                               "reason": "required source value missing", "candidates": ""})
+        records.append(record)
+    stats = {"source_rows": len(source_rows), "active_catalogue_rows": len(active_rows),
+             "catalogue_records": len(records),
+             "appendix1_priority_rows": sum(r["priority_rank"] == 10 for r in records),
+             "pim_products": len(pim_products), "issues": len(issues)}
+    return records, issues, stats
+
+
 def reconcile(annex_path: Path, pim_path: Path,
               atc_reference_paths: list[Path] | None = None
               ) -> tuple[list[dict], list[dict], dict]:
@@ -231,6 +336,9 @@ def replace_catalogue(db_path: Path, records: list[dict], issues: list[dict]) ->
     db = sqlite3.connect(db_path)
     try:
         db.executescript(SCHEMA)
+        columns_present = {row[1] for row in db.execute("PRAGMA table_info(local_catalogue)")}
+        if "priority_rank" not in columns_present:
+            db.execute("ALTER TABLE local_catalogue ADD COLUMN priority_rank INTEGER NOT NULL DEFAULT 100")
         with db:
             db.execute("DELETE FROM local_catalogue")
             db.execute("DELETE FROM local_catalogue_issue")
@@ -254,7 +362,13 @@ def replace_catalogue(db_path: Path, records: list[dict], issues: list[dict]) ->
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="app.catalogue_build")
-    parser.add_argument("--annex", type=Path, required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--catalogue-csv", type=Path,
+                        help="ncpr_all_reimb_clean.csv; imports current active rows")
+    source.add_argument("--annex", type=Path,
+                        help="legacy Annex 4 workbook import")
+    parser.add_argument("--priority-appendix", type=Path,
+                        help="ncpr_annex_clean.csv; active Appendix 1 rows rank first")
     parser.add_argument("--pim-sql", type=Path, required=True)
     parser.add_argument("--atc-csv", type=Path, action="append", default=[],
                         help="official appendix extract with national_id and atc; repeatable")
@@ -265,7 +379,13 @@ def main() -> int:
                         help="optional JSON report; no report file is written by default")
     args = parser.parse_args()
 
-    records, issues, stats = reconcile(args.annex, args.pim_sql, args.atc_csv)
+    if args.catalogue_csv:
+        if not args.priority_appendix:
+            parser.error("--catalogue-csv requires --priority-appendix")
+        records, issues, stats = reconcile_full_catalogue(
+            args.catalogue_csv, args.priority_appendix, args.pim_sql)
+    else:
+        records, issues, stats = reconcile(args.annex, args.pim_sql, args.atc_csv)
     print(json.dumps(stats, ensure_ascii=False, indent=2))
     if issues:
         print("\nfirst unresolved fields:")

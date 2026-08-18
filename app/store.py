@@ -66,6 +66,23 @@ CREATE TABLE IF NOT EXISTS request_log (
     note          TEXT
 );
 
+-- Compact, queryable audit trail.  Raw SOAP XML remains in the archive;
+-- this table intentionally records only operational metadata.
+CREATE TABLE IF NOT EXISTS audit_event (
+    event_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts             TEXT NOT NULL,
+    operation      TEXT NOT NULL,
+    product_id     TEXT,
+    soap_action    TEXT,
+    outcome        TEXT NOT NULL,
+    http_status    INTEGER,
+    local_modified INTEGER NOT NULL DEFAULT 0,
+    actor          TEXT,
+    detail         TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_audit_event_ts ON audit_event(ts DESC);
+CREATE INDEX IF NOT EXISTS ix_audit_event_product ON audit_event(product_id, ts DESC);
+
 CREATE TABLE IF NOT EXISTS daily_counter (
     day       TEXT PRIMARY KEY,    -- YYYY-MM-DD, local
     used      INTEGER NOT NULL DEFAULT 0
@@ -75,6 +92,20 @@ CREATE TABLE IF NOT EXISTS meta (
     k TEXT PRIMARY KEY,
     v TEXT
 );
+
+CREATE TABLE IF NOT EXISTS bulk_run (
+    singleton     INTEGER PRIMARY KEY CHECK(singleton = 1),
+    state         TEXT NOT NULL DEFAULT 'idle'
+                  CHECK(state IN ('idle','starting','running','stopping',
+                                  'stopped','completed','halted','failed')),
+    pid           INTEGER,
+    requested_at  TEXT,
+    started_at    TEXT,
+    stopped_at    TEXT,
+    actor         TEXT,
+    note          TEXT
+);
+INSERT OR IGNORE INTO bulk_run(singleton, state) VALUES(1, 'idle');
 
 -- Output of listMedicinalProducts. Carries no GTIN (the list item type has
 -- no gtins field) but does carry inn, atcCodes, medicamentForm, quantity,
@@ -102,9 +133,9 @@ CREATE TABLE IF NOT EXISTS catalogue (
 );
 CREATE INDEX IF NOT EXISTS ix_catalogue_reg ON catalogue(register_code);
 
--- Offline catalogue used by the pharmacist GUI. Annex 4 decides which rows
--- are active and supplies the national/registration identifiers. The local
--- PimChecker snapshot enriches ATC data without spending SESPA requests.
+-- Offline catalogue used by the pharmacist GUI.  The current full reimbursed
+-- register supplies the active product set; Appendix 1 controls display and
+-- collection priority. PimChecker can enrich ATC data without SESPA calls.
 CREATE TABLE IF NOT EXISTS local_catalogue (
     national_id             TEXT PRIMARY KEY,
     registration_number     TEXT NOT NULL,
@@ -116,7 +147,8 @@ CREATE TABLE IF NOT EXISTS local_catalogue (
     atc_source              TEXT NOT NULL,
     annex_snapshot          TEXT NOT NULL,
     pim_snapshot            TEXT NOT NULL,
-    imported_at             TEXT NOT NULL
+    imported_at             TEXT NOT NULL,
+    priority_rank           INTEGER NOT NULL DEFAULT 100
 );
 CREATE INDEX IF NOT EXISTS ix_local_catalogue_registration
     ON local_catalogue(registration_number);
@@ -158,6 +190,12 @@ class Store:
         self.db = sqlite3.connect(path, timeout=30)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
+        columns = {row["name"] for row in self.db.execute(
+            "PRAGMA table_info(local_catalogue)")}
+        if "priority_rank" not in columns:
+            self.db.execute(
+                "ALTER TABLE local_catalogue ADD COLUMN priority_rank "
+                "INTEGER NOT NULL DEFAULT 100")
         self.db.commit()
 
     # ---------- queue ----------
@@ -211,6 +249,18 @@ class Store:
                         tuple(kw.values()))
         self.db.commit()
 
+    def audit(self, operation: str, outcome: str, *, product_id: str | None = None,
+              soap_action: str | None = None, http_status: int | None = None,
+              local_modified: bool = False, actor: str | None = None,
+              detail: str | None = None) -> None:
+        """Record safe operational metadata, never credentials or raw XML."""
+        self.db.execute(
+            "INSERT INTO audit_event(ts,operation,product_id,soap_action,outcome,"
+            "http_status,local_modified,actor,detail) VALUES(?,?,?,?,?,?,?,?,?)",
+            (dt.datetime.now(dt.timezone.utc).isoformat(), operation, product_id,
+             soap_action, outcome, http_status, int(local_modified), actor, detail))
+        self.db.commit()
+
     # ---------- daily cap (restart-safe) ----------
 
     def used_today(self, day: str) -> int:
@@ -260,4 +310,25 @@ class Store:
         self.db.execute(
             "INSERT INTO meta(k,v) VALUES(?,?) "
             "ON CONFLICT(k) DO UPDATE SET v=excluded.v", (k, v))
+        self.db.commit()
+
+    # ---------- bulk-run control ----------
+
+    def bulk_state(self) -> dict:
+        return dict(self.db.execute(
+            "SELECT * FROM bulk_run WHERE singleton=1").fetchone())
+
+    def set_bulk_state(self, state: str, *, pid: int | None = None,
+                       actor: str | None = None, note: str | None = None) -> None:
+        now = dt.datetime.now(dt.timezone.utc).isoformat()
+        started_at = now if state == "running" else None
+        stopped_at = now if state in {"stopped", "completed", "halted", "failed"} else None
+        requested_at = now if state == "starting" else None
+        self.db.execute(
+            "UPDATE bulk_run SET state=?, pid=COALESCE(?,pid), "
+            "requested_at=COALESCE(?,requested_at), "
+            "started_at=COALESCE(?,started_at), "
+            "stopped_at=COALESCE(?,stopped_at), actor=COALESCE(?,actor), note=? "
+            "WHERE singleton=1",
+            (state, pid, requested_at, started_at, stopped_at, actor, note))
         self.db.commit()

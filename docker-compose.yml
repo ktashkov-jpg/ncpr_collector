@@ -19,6 +19,12 @@ services:
     network_mode: "host"
     restart: unless-stopped
     command: ["gunicorn", "--bind", "127.0.0.1:6001", "--workers", "1", "app.web:create_app()"]
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:6001/api/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   ncpr-collector:
     build:

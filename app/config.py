@@ -64,6 +64,9 @@ class Config:
     db_dir_override: str = _str("NCPR_DB_DIR", "")
     archive_dir_override: str = _str("NCPR_ARCHIVE_DIR", "")
     bulk_approved: bool = _str("NCPR_BULK_APPROVED", "0") == "1"
+    # Keep upstream identity opt-in: a client-controlled X-Forwarded-User
+    # header is not an identity assertion unless the proxy strips and sets it.
+    trust_proxy_identity: bool = _str("NCPR_TRUST_PROXY_IDENTITY", "0") == "1"
 
     @property
     def db_dir(self) -> str:
@@ -110,6 +113,11 @@ class Config:
     @property
     def lock_file(self) -> str:
         return os.path.join(self.db_dir, "collector.lock")
+
+    @property
+    def stop_file(self) -> str:
+        """Cooperative bulk-stop request shared by web and collector processes."""
+        return os.path.join(self.db_dir, "STOP_REQUESTED")
 
     def ensure_dirs(self) -> None:
         for path in (self.db_dir, self.archive_dir, self.raw_dir, self.input_dir):
