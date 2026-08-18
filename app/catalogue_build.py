@@ -157,14 +157,15 @@ def read_priority_appendix(path: Path) -> tuple[dict[str, set[str]], dict[str, s
 
 
 def reconcile_full_catalogue(catalogue_path: Path, priority_appendix_path: Path,
-                             pim_path: Path) -> tuple[list[dict], list[dict], dict]:
+                             pim_path: Path | None = None
+                             ) -> tuple[list[dict], list[dict], dict]:
     """Build the current catalogue from ncpr_all_reimb_clean.csv.
 
     Historical rows remain in the source file; the operator UI intentionally
     imports only status_active rows. In this source those have unique national
     identifiers, which preserves the SOAP lookup contract.
     """
-    pim_products = read_pim_products(pim_path)
+    pim_products = read_pim_products(pim_path) if pim_path else []
     by_national: dict[str, list[PimProduct]] = defaultdict(list)
     atc_by_inn: dict[str, set[str]] = defaultdict(set)
     for product in pim_products:
@@ -203,7 +204,7 @@ def reconcile_full_catalogue(catalogue_path: Path, priority_appendix_path: Path,
             candidates = atc_by_inn.get(norm_text(clean(source.get("inn"))), set())
             atc_codes = set(candidates) if len(candidates) == 1 else set()
             atc_source = "pim:unique_inn" if atc_codes else "unresolved"
-            if not atc_codes:
+            if not atc_codes and pim_path:
                 issues.append({"national_id": national_id, "field": "atc_codes",
                                "reason": "no unambiguous ATC candidate",
                                "candidates": "|".join(sorted(candidates))})
@@ -227,11 +228,16 @@ def reconcile_full_catalogue(catalogue_path: Path, priority_appendix_path: Path,
             "product_description": description,
             "atc_source": atc_source,
             "annex_snapshot": priority_appendix_path.name,
-            "pim_snapshot": pim_path.name,
+            "pim_snapshot": pim_path.name if pim_path else "",
             "imported_at": imported_at,
             "priority_rank": 10 if national_id in appendix_atc else 100,
         }
-        for field in REQUIRED_FIELDS:
+        # The full NCPR table is authoritative for identity and description.
+        # ATC is guaranteed for the Appendix 1 priority set; outside that set
+        # it is optional unless a PimChecker snapshot is explicitly supplied.
+        required_fields = tuple(field for field in REQUIRED_FIELDS
+                                if field != "atc_codes")
+        for field in required_fields:
             if not record[field] and not any(i["national_id"] == national_id and
                                              i["field"] == field for i in issues):
                 issues.append({"national_id": national_id, "field": field,
@@ -369,7 +375,9 @@ def main() -> int:
                         help="legacy Annex 4 workbook import")
     parser.add_argument("--priority-appendix", type=Path,
                         help="ncpr_annex_clean.csv; active Appendix 1 rows rank first")
-    parser.add_argument("--pim-sql", type=Path, required=True)
+    parser.add_argument("--pim-sql", type=Path,
+                        help="optional ATC enrichment for full CSV mode; "
+                             "required by legacy --annex mode")
     parser.add_argument("--atc-csv", type=Path, action="append", default=[],
                         help="official appendix extract with national_id and atc; repeatable")
     parser.add_argument("--db", type=Path)
@@ -385,6 +393,8 @@ def main() -> int:
         records, issues, stats = reconcile_full_catalogue(
             args.catalogue_csv, args.priority_appendix, args.pim_sql)
     else:
+        if not args.pim_sql:
+            parser.error("legacy --annex mode requires --pim-sql")
         records, issues, stats = reconcile(args.annex, args.pim_sql, args.atc_csv)
     print(json.dumps(stats, ensure_ascii=False, indent=2))
     if issues:

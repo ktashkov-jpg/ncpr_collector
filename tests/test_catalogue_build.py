@@ -137,3 +137,23 @@ def test_full_catalogue_imports_active_rows_and_prioritizes_appendix1(tmp_path):
     assert stats["source_rows"] == 3
     assert stats["active_catalogue_rows"] == 2
     assert stats["appendix1_priority_rows"] == 1
+
+
+def test_full_catalogue_does_not_require_pim_snapshot(tmp_path):
+    catalogue = tmp_path / "ncpr_all_reimb_clean.csv"
+    appendix = tmp_path / "ncpr_annex_clean.csv"
+    catalogue.write_text(
+        "national_num,reg_number,product_name,form,strength_full,pack_size,pack_text,"
+        "inn,mah,status_active\n"
+        "200,REG-200,Other drug,Capsule,20 mg,20,,Other INN,Holder,True\n",
+        encoding="utf-8-sig",
+    )
+    appendix.write_text(
+        "national_num,annex,atc_code,atc_all,mah,status\n",
+        encoding="utf-8-sig",
+    )
+    records, issues, stats = reconcile_full_catalogue(catalogue, appendix)
+    assert not issues
+    assert records[0]["atc_codes"] == ""
+    assert records[0]["pim_snapshot"] == ""
+    assert stats["pim_products"] == 0

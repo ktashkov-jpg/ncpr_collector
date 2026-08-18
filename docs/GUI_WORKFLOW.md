@@ -80,8 +80,8 @@ Required sources:
   catalogue; only rows marked currently active are loaded into the operator UI;
 - `sources/ncpr/clean/ncpr_annex_clean.csv` to rank active Appendix 1 products
   ahead of the rest of the catalogue;
-- a local PimChecker PostgreSQL backup for additional ATC and authorization
-  holder coverage;
+- optionally, a current PimChecker PostgreSQL backup for additional ATC
+  coverage outside Appendix 1.
 
 Run a strict check before replacing the catalogue:
 
@@ -89,7 +89,6 @@ Run a strict check before replacing the catalogue:
 python -m app.catalogue_build \
   --catalogue-csv /archive/input/ncpr_all_reimb_clean.csv \
   --priority-appendix /archive/input/ncpr_annex_clean.csv \
-  --pim-sql /archive/input/database_backup.sql \
   --check-only
 ```
 

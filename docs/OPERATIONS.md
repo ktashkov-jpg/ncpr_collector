@@ -128,7 +128,6 @@ outside Appendix 1.
 docker compose run --rm ncpr-collector python -m app.catalogue_build \
   --catalogue-csv /archive/input/ncpr_all_reimb_clean.csv \
   --priority-appendix /archive/input/ncpr_annex_clean.csv \
-  --pim-sql /archive/input/database_backup.sql \
   --check-only
 ```
 
@@ -137,6 +136,11 @@ active catalogue rows, and Appendix 1 priority rows. Re-run without
 `--check-only` to replace `local_catalogue` transactionally. The legacy
 `--annex` mode remains available for reproducibility, but it is no longer the
 production catalogue source.
+
+PimChecker SQL is optional in full-source mode. When omitted, Appendix 1 keeps
+its official ATC coverage and products outside Appendix 1 remain searchable by
+National ID, BDA number, trade name, and INN. Pass `--pim-sql` only when a
+current snapshot is available and additional ATC enrichment is desired.
 
 ## Collect
 
