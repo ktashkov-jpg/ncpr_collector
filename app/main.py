@@ -30,7 +30,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     print(f"endpoint     : {config.endpoint}")
     print(f"db dir       : {config.db_dir}")
     print(f"archive dir  : {config.archive_dir}")
-    print(f"delay        : {config.delay_min_s}-{config.delay_max_s}s")
+    print(f"delay        : {config.delay_min_s}-{config.delay_max_s}s "
+          f"(mode {config.delay_mode_s}s)")
     print(f"daily cap    : {config.daily_cap}")
     print(f"window       : {config.window_start_hour:02d}:00-"
           f"{config.window_end_hour:02d}:00 local")

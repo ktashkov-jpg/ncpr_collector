@@ -21,6 +21,12 @@ def _str(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
+_DELAY_MIN_S = _int("NCPR_DELAY_MIN_S", 180)
+_DELAY_MAX_S = _int("NCPR_DELAY_MAX_S", 480)
+_DELAY_MODE_DEFAULT = round(
+    _DELAY_MIN_S + (_DELAY_MAX_S - _DELAY_MIN_S) * 0.2)
+
+
 @dataclass(frozen=True)
 class Config:
     # --- service (runbook §2) ---
@@ -31,8 +37,11 @@ class Config:
                           "http://webservice.portal.ncprmp.sirma.com")
 
     # --- rate policy (runbook §9) ---
-    delay_min_s: int = _int("NCPR_DELAY_MIN_S", 300)
-    delay_max_s: int = _int("NCPR_DELAY_MAX_S", 600)
+    # Triangular delay: always 3-8 minutes, with the most likely interval
+    # centered at 4 minutes so roughly 55% of waits land within 3-5 minutes.
+    delay_min_s: int = _DELAY_MIN_S
+    delay_mode_s: int = _int("NCPR_DELAY_MODE_S", _DELAY_MODE_DEFAULT)
+    delay_max_s: int = _DELAY_MAX_S
     daily_cap: int = _int("NCPR_DAILY_CAP", 80)
     window_start_hour: int = _int("NCPR_WINDOW_START_HOUR", 8)   # local time
     window_end_hour: int = _int("NCPR_WINDOW_END_HOUR", 18)
@@ -126,6 +135,10 @@ class Config:
     def validate(self) -> None:
         if self.delay_min_s > self.delay_max_s:
             raise ValueError("NCPR_DELAY_MIN_S exceeds NCPR_DELAY_MAX_S")
+        if not self.delay_min_s <= self.delay_mode_s <= self.delay_max_s:
+            raise ValueError(
+                "NCPR_DELAY_MODE_S must be between NCPR_DELAY_MIN_S and "
+                "NCPR_DELAY_MAX_S")
         if self.delay_min_s < 60:
             raise ValueError(
                 "Refusing a sub-60s delay against a monitored allowlisted "

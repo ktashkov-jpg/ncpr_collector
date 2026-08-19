@@ -161,7 +161,7 @@ Each prevents a specific, real failure — not defensive decoration.
 | raw XML archived **before** parsing | interrupted runs stay auditable (§11) |
 | WSDL fetched once, hash stored | re-fetching definitions per product (§9); a changed hash flags a moved contract |
 | GTIN stored as `TEXT`, export fully quoted | `05712249101367` → `5.71225E+12`. This project has been bitten three times already (HANDOVER §11) |
-| interruptible sleep | `SIGTERM` waiting out a 10-minute delay |
+| interruptible 3-8 minute triangular delay (mode 4 minutes) | synchronized request timing and `SIGTERM` waiting out a full delay |
 
 Stop/retry rules follow §10 exactly: 403 stop immediately · 429 honour
 `Retry-After`, else stop ≥24 h · 5xx wait 30 min, then 2 h, then stop for the

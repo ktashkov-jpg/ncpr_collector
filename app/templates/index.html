@@ -35,12 +35,12 @@
       <div class="bulk-control"><span>Bulk state</span><strong data-bulk-state>{{ status.bulk.state }}</strong></div>
     </section>
 
-    <section class="operations-bar" aria-label="Exports and bulk collection">
+    <section class="operations-bar" aria-label="Exports and bulk scraping">
       <div><strong>Collected data</strong><span><b data-collected>{{ status.collected_rows }}</b> stored GTIN rows</span></div>
       <div class="operation-actions">
         <button class="quiet-button download-button" type="button" data-download-all><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9m-4-3 4 4 4-4M4 16h12"/></svg>Export all collected CSV</button>
-        <button class="quiet-button bulk-start" type="button" data-bulk-start><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 5 7 5-7 5z"/></svg>Start bulk export</button>
-        <button class="quiet-button bulk-stop" type="button" data-bulk-stop hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 6h8v8H6z"/></svg>Stop bulk export</button>
+        <button class="quiet-button bulk-start" type="button" data-bulk-start><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 5 7 5-7 5z"/></svg>Start bulk scrape</button>
+        <button class="quiet-button bulk-stop" type="button" data-bulk-stop hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 6h8v8H6z"/></svg>Stop bulk scrape</button>
       </div>
       <p class="operation-message" data-operation-message role="status"></p>
     </section>
@@ -138,7 +138,7 @@
   <dialog class="bulk-dialog" data-bulk-dialog aria-labelledby="bulk-dialog-title">
     <form method="dialog">
       <div class="dialog-heading">
-        <div><h2 id="bulk-dialog-title">Confirm bulk SOAP collection</h2><p>This starts the existing rate-limited collector. Progress and queue state are stored in SQLite.</p></div>
+        <div><h2 id="bulk-dialog-title">Confirm bulk register scrape</h2><p>This starts the existing rate-limited scraper for all queued drugs. Progress and queue state are stored in SQLite.</p></div>
         <button class="dialog-close" value="cancel" aria-label="Close confirmation">Close</button>
       </div>
       <dl class="bulk-facts">
@@ -149,7 +149,7 @@
       </dl>
       <label class="confirm-check"><input type="checkbox" data-bulk-confirm><span>I reviewed the request count and confirm written NCPR bulk/rate approval is on file.</span></label>
       <p class="dialog-warning">Stopping preserves completed results and remaining queue items. It does not undo requests already sent.</p>
-      <div class="dialog-actions"><button class="quiet-button" value="cancel">Cancel</button><button class="primary-button" type="button" data-bulk-confirm-start disabled>Start <span data-bulk-confirm-count>0</span> requests</button></div>
+      <div class="dialog-actions"><button class="quiet-button" value="cancel">Cancel</button><button class="primary-button" type="button" data-bulk-confirm-start disabled>Start bulk scrape · <span data-bulk-confirm-count>0</span> requests</button></div>
     </form>
   </dialog>
 

@@ -196,6 +196,19 @@ class Store:
             self.db.execute(
                 "ALTER TABLE local_catalogue ADD COLUMN priority_rank "
                 "INTEGER NOT NULL DEFAULT 100")
+        # CREATE TABLE IF NOT EXISTS does not update databases created by an
+        # older release.  These GTIN evidence fields were added after the
+        # original product table and must be migrated before a lookup tries to
+        # save its SOAP result.
+        product_columns = {row["name"] for row in self.db.execute(
+            "PRAGMA table_info(product)")}
+        for name, declaration in (
+            ("expected_check_digit", "TEXT"),
+            ("indicator_digit", "TEXT"),
+        ):
+            if name not in product_columns:
+                self.db.execute(
+                    f"ALTER TABLE product ADD COLUMN {name} {declaration}")
         self.db.commit()
 
     # ---------- queue ----------

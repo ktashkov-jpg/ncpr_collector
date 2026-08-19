@@ -186,8 +186,8 @@ The web UI also provides **Export all collected CSV**. That CSRF-protected
 download contains all rows currently stored in `product` and goes to the
 operator browser's Downloads folder. It does not mark review rows exported.
 
-When `NCPR_BULK_APPROVED=1`, **Start bulk export** launches the same collector
-after an explicit pending-count confirmation. **Stop bulk export** requests a
+When `NCPR_BULK_APPROVED=1`, **Start bulk scrape** launches the same collector
+after an explicit pending-count confirmation. **Stop bulk scrape** requests a
 cooperative stop. Do not remove the SQLite database between runs: it is the
 persistent memory that prevents completed queue items from being repeated.
 

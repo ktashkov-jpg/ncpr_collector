@@ -107,8 +107,8 @@ and never guessed.
 The GUI includes **Launch full scrape**, visually separated from individual
 lookup actions. It is an operational control, not the primary call to action.
 
-The implemented controls are labelled **Start bulk export** and **Stop bulk
-export**. Start launches the existing collector process only after displaying
+The implemented controls are labelled **Start bulk scrape** and **Stop bulk
+scrape**. Start launches the existing collector process only after displaying
 and reconfirming the current pending count. Stop writes a cooperative marker;
 the collector finishes any in-flight HTTP call, interrupts its wait, and exits.
 Queue rows, completed results, the daily counter, and the last bulk-run state

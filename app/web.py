@@ -20,6 +20,7 @@ import threading
 from pathlib import Path
 
 from flask import Flask, Response, abort, jsonify, render_template, request, session
+from werkzeug.exceptions import HTTPException
 
 from app import soap
 from app.collect import acquire_lock, cache_wsdl, halt, in_window, release_lock, today
@@ -231,6 +232,22 @@ def create_app(test_config: dict | None = None) -> Flask:
         store.audit("bulk_control", "stop_requested", local_modified=True,
                     actor=_actor(), detail="queue state preserved")
         return jsonify(status=_status(app)), 202
+
+    @app.errorhandler(HTTPException)
+    def http_error(exc: HTTPException):
+        if request.path.startswith("/api/"):
+            return jsonify(error=exc.description), exc.code
+        return exc
+
+    @app.errorhandler(Exception)
+    def unexpected_error(exc: Exception):
+        if not request.path.startswith("/api/"):
+            raise exc
+        app.logger.exception("Unhandled API error on %s", request.path)
+        return jsonify(error=(
+            "The server could not complete this request. Check the service "
+            "logs, then try again."
+        )), 500
 
     return app
 

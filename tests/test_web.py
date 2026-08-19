@@ -36,12 +36,36 @@ def test_index_and_local_catalogue_search(client):
     page = web.get("/")
     assert page.status_code == 200
     assert b"Identify a medicinal product" in page.data
+    assert b"Start bulk scrape" in page.data
+    assert b"Stop bulk scrape" in page.data
     assert web.get("/api/options/national_id?q=75").json == ["758"]
     result = web.get("/api/catalogue?national_id=758").json
     assert result[0]["trade_name"] == "Example 500 mg"
     assert result[0]["atc_codes"] == "A10BA02"
     assert web.get("/api/catalogue?national_id=75").json[0]["national_id"] == "758"
     assert web.get("/api/catalogue?registration_number=123").json[0]["national_id"] == "758"
+
+
+def test_api_errors_are_json(client):
+    web, _ = client
+    response = web.get("/api/not-a-route")
+    assert response.status_code == 404
+    assert response.is_json
+    assert response.json["error"]
+
+
+def test_unexpected_api_errors_do_not_return_html(client):
+    web, _ = client
+
+    def fail():
+        raise RuntimeError("database detail must stay in the server log")
+
+    web.application.view_functions["api_status"] = fail
+    response = web.get("/api/status")
+    assert response.status_code == 500
+    assert response.is_json
+    assert "could not complete" in response.json["error"]
+    assert "database detail" not in response.get_data(as_text=True)
 
 
 def test_mutations_require_csrf_and_bulk_stays_locked(client):

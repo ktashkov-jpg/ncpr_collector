@@ -4,7 +4,23 @@ const state={filters:{},selected:null,reviews:[],searchRequest:0};
 const jsonHeaders={"Content-Type":"application/json","X-CSRF-Token":window.NCPR.csrf};
 
 function debounce(fn,wait=180){let id;return(...args)=>{clearTimeout(id);id=setTimeout(()=>fn(...args),wait)}}
-async function getJSON(url,options){const response=await fetch(url,options);const data=await response.json();if(!response.ok)throw new Error(data.error||`Request failed (${response.status})`);return data}
+async function getJSON(url,options){
+  const response=await fetch(url,options);
+  const contentType=response.headers.get('Content-Type')||'';
+  const body=await response.text();
+  let data;
+  if(contentType.includes('json')||/^[\s]*[\[{]/.test(body)){
+    try{data=JSON.parse(body)}catch{}
+  }
+  if(!response.ok){
+    const fallback=response.status===404
+      ?'This page and the server API are out of sync. Reload the page; if the problem remains, restart the web service.'
+      :`The server could not complete the request (${response.status}). Check the service logs and try again.`;
+    throw new Error(data?.error||fallback);
+  }
+  if(data===undefined)throw new Error('The server returned an unexpected response. Reload the page and try again.');
+  return data;
+}
 async function postDownload(url){const response=await fetch(url,{method:'POST',headers:{'X-CSRF-Token':window.NCPR.csrf}});if(!response.ok){let message=`Download failed (${response.status})`;try{message=(await response.json()).error||message}catch{}throw new Error(message)}const blob=await response.blob();const disposition=response.headers.get('Content-Disposition')||'';const filename=disposition.match(/filename="([^"]+)"/)?.[1]||'ncpr-collected.csv';const href=URL.createObjectURL(blob);const link=document.createElement('a');link.href=href;link.download=filename;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(href),1000)}
 
 class Combobox{
@@ -29,12 +45,12 @@ function renderReviews(){const body=$('[data-reviews]');body.replaceChildren();s
 async function decide(id,status){const data=await getJSON(`/api/reviews/${id}`,{method:'POST',headers:jsonHeaders,body:JSON.stringify({status})});state.reviews=data.reviews;renderReviews();refreshStatus()}
 $('[data-export]').addEventListener('click',async event=>{event.currentTarget.disabled=true;try{await getJSON('/api/export',{method:'POST',headers:jsonHeaders});await Promise.all([loadReviews(),refreshStatus()])}catch(error){event.currentTarget.disabled=false;alert(error.message)}});
 let latestStatus=null;
-async function refreshStatus(){const status=await getJSON('/api/status');$('[data-catalogue-count]').textContent=status.catalogue_rows;$('[data-used]').textContent=status.requests_used;$('[data-pending]').textContent=status.pending_reviews;$('[data-staged]').textContent=status.staged;$('[data-collected]').textContent=status.collected_rows;const active=['starting','running','stopping'].includes(status.bulk.state)||status.collector_running;$('[data-bulk-state]').textContent=status.bulk.state;$('[data-bulk-start]').hidden=active;$('[data-bulk-start]').disabled=!status.bulk_approved||status.halted;$('[data-bulk-start]').title=!status.bulk_approved?'Written NCPR launch approval has not been recorded':'';$('[data-bulk-stop]').hidden=!active;const label=$('[data-status-label]');label.textContent=status.halted?'SOAP requests halted':active?'Bulk collector active':'Local catalogue ready';$('[data-status-state]').classList.toggle('error',status.halted);latestStatus=status;return status}
+async function refreshStatus(){const status=await getJSON('/api/status');$('[data-catalogue-count]').textContent=status.catalogue_rows;$('[data-used]').textContent=status.requests_used;$('[data-pending]').textContent=status.pending_reviews;$('[data-staged]').textContent=status.staged;$('[data-collected]').textContent=status.collected_rows;const active=['starting','running','stopping'].includes(status.bulk.state)||status.collector_running;$('[data-bulk-state]').textContent=status.bulk.state;$('[data-bulk-start]').hidden=active;$('[data-bulk-start]').disabled=!status.bulk_approved||status.halted;$('[data-bulk-start]').title=!status.bulk_approved?'Written NCPR launch approval has not been recorded':'';$('[data-bulk-stop]').hidden=!active;const label=$('[data-status-label]');label.textContent=status.halted?'SOAP requests halted':active?'Bulk scraper active':'Local catalogue ready';$('[data-status-state]').classList.toggle('error',status.halted);latestStatus=status;return status}
 $('[data-download-all]').addEventListener('click',async event=>{const button=event.currentTarget;const message=$('[data-operation-message]');button.disabled=true;message.className='operation-message';message.textContent='Preparing collected rows…';try{await postDownload('/api/export/all');message.textContent='CSV download started.'}catch(error){showOperationError(error.message)}finally{button.disabled=false}});
 const bulkDialog=$('[data-bulk-dialog]');const bulkCheck=$('[data-bulk-confirm]');
 $('[data-bulk-start]').addEventListener('click',async()=>{try{const status=await refreshStatus();const pending=status.queue.pending||0;const days=Math.ceil(pending/Math.max(status.daily_cap,1));$('[data-bulk-pending]').textContent=pending;$('[data-bulk-used]').textContent=status.requests_used;$('[data-bulk-cap]').textContent=status.daily_cap;$('[data-bulk-days]').textContent=pending?`at least ${days} operating day${days===1?'':'s'}`:'No pending work';$('[data-bulk-confirm-count]').textContent=pending;bulkCheck.checked=false;$('[data-bulk-confirm-start]').disabled=true;bulkDialog.showModal()}catch(error){showOperationError(error.message)}});
 bulkCheck.addEventListener('change',()=>{$('[data-bulk-confirm-start]').disabled=!bulkCheck.checked||!(latestStatus?.queue.pending)});
-$('[data-bulk-confirm-start]').addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;try{await getJSON('/api/collector/launch',{method:'POST',headers:jsonHeaders,body:JSON.stringify({confirmed:true,pending:latestStatus.queue.pending||0})});bulkDialog.close();$('[data-operation-message]').textContent='Bulk collection is starting. SQLite queue state survives a stop.';await refreshStatus()}catch(error){showOperationError(error.message);button.disabled=false}});
+$('[data-bulk-confirm-start]').addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;try{await getJSON('/api/collector/launch',{method:'POST',headers:jsonHeaders,body:JSON.stringify({confirmed:true,pending:latestStatus.queue.pending||0})});bulkDialog.close();$('[data-operation-message]').textContent='Bulk scrape is starting. SQLite queue state survives a stop.';await refreshStatus()}catch(error){showOperationError(error.message);button.disabled=false}});
 $('[data-bulk-stop]').addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;try{await getJSON('/api/collector/stop',{method:'POST',headers:jsonHeaders});$('[data-operation-message]').textContent='Stop requested. The current call will finish; queue state is preserved.';await refreshStatus()}catch(error){showOperationError(error.message)}finally{button.disabled=false}});
 function showOperationError(message){const target=$('[data-operation-message]');target.className='operation-message error';target.textContent=message}
 $('[data-review-retry]').addEventListener('click',()=>loadReviews().catch(()=>{}));

@@ -193,6 +193,7 @@ def main() -> None:
 
         consecutive_5xx = 0
         log(f"policy: 1 worker | delay {config.delay_min_s}-{config.delay_max_s}s "
+            f"(mode {config.delay_mode_s}s) "
             f"| cap {config.daily_cap}/day | window "
             f"{config.window_start_hour:02d}:00-{config.window_end_hour:02d}:00")
         log(f"queue: {store.queue_stats()}")
@@ -258,7 +259,7 @@ def main() -> None:
                     consecutive_5xx = 0
                 continue
 
-            delay = random.randint(config.delay_min_s, config.delay_max_s)
+            delay = _transaction_delay(config)
             log(f"  sleeping {delay}s")
             _sleep(delay, config)
 
@@ -267,6 +268,12 @@ def main() -> None:
         release_lock(config)
         Path(config.stop_file).unlink(missing_ok=True)
         store.set_bulk_state(final_state, note="queue state preserved")
+
+
+def _transaction_delay(config: Config, rng=random) -> int:
+    """Return a bounded wait, gently weighted toward the configured mode."""
+    return round(rng.triangular(
+        config.delay_min_s, config.delay_max_s, config.delay_mode_s))
 
 
 def _sleep(seconds: int, config: Config | None = None) -> None:
