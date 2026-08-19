@@ -18,7 +18,7 @@ services:
       - ${ARCHIVE_ROOT:-${DB_ROOT:-./data}}:/archive
     network_mode: "host"
     restart: unless-stopped
-    command: ["gunicorn", "--bind", "127.0.0.1:6001", "--workers", "1", "app.web:create_app()"]
+    command: ["gunicorn", "--bind", "127.0.0.1:6001", "--workers", "1", "--access-logfile", "-", "--error-logfile", "-", "--capture-output", "app.web:create_app()"]
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:6001/api/status"]
       interval: 30s

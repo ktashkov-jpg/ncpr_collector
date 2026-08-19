@@ -54,6 +54,13 @@ def test_api_errors_are_json(client):
     assert response.json["error"]
 
 
+def test_csrf_token_can_be_supplied_in_json_body(client):
+    web, _ = client
+    response = web.post("/api/export", json={"csrf_token": csrf(web)})
+    assert response.status_code == 200
+    assert response.is_json
+
+
 def test_unexpected_api_errors_do_not_return_html(client):
     web, _ = client
 

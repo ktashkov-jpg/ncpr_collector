@@ -448,7 +448,9 @@ def _export_confirmed(app: Flask, db: sqlite3.Connection) -> int:
 
 
 def _require_csrf() -> None:
-    supplied = request.headers.get("X-CSRF-Token", "")
+    payload = request.get_json(silent=True) or {}
+    supplied = request.headers.get("X-CSRF-Token", "") or str(
+        payload.get("csrf_token", ""))
     expected = session.get("csrf_token", "")
     if not supplied or not expected or not secrets.compare_digest(supplied, expected):
         abort(403)
