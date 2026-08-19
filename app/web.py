@@ -35,6 +35,8 @@ OPTION_FIELDS = {
     "inn": "inn",
 }
 
+REVIEW_PAGE_SIZE = 20
+
 
 def create_app(test_config: dict | None = None) -> Flask:
     runtime_config = Config()
@@ -113,7 +115,7 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     @app.get("/api/reviews")
     def reviews():
-        return jsonify(_reviews(_db(app)))
+        return jsonify(_reviews(_db(app), limit=REVIEW_PAGE_SIZE))
 
     @app.post("/api/lookup")
     def lookup():
@@ -388,7 +390,7 @@ def _stage(db: sqlite3.Connection, product_rowid: int, national_id: str) -> None
     db.commit()
 
 
-def _reviews(db: sqlite3.Connection) -> list[dict]:
+def _reviews(db: sqlite3.Connection, *, limit: int = REVIEW_PAGE_SIZE) -> list[dict]:
     rows = db.execute("""
         SELECT r.review_id, r.status, r.exported_at, r.national_id,
                c.registration_number, c.trade_name, c.inn, c.atc_codes,
@@ -397,8 +399,11 @@ def _reviews(db: sqlite3.Connection) -> list[dict]:
         FROM review_item r
         JOIN product p ON p.rowid=r.product_rowid
         LEFT JOIN local_catalogue c ON c.national_id=r.national_id
-        ORDER BY r.review_id DESC LIMIT 100
-    """).fetchall()
+        ORDER BY CASE WHEN r.status='pending' THEN 0 ELSE 1 END,
+                 CASE WHEN r.status='pending' THEN r.review_id END,
+                 r.review_id DESC
+        LIMIT ?
+    """, (limit,)).fetchall()
     return [dict(row) for row in rows]
 
 

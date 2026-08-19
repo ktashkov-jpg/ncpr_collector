@@ -44,7 +44,9 @@ workflow document is the committed product-level design contract.
    remain visibly flagged without modifying `gtin_raw`.
 6. **Accept or reject.** A row does not enter the export batch until the
    pharmacist confirms it represents the intended product/package. Rejected
-   rows remain auditable but are not exported.
+   rows remain auditable but are not exported. The working table returns a
+   compact 20-row window, with pending decisions first, so growing review
+   history does not inflate every API response.
 7. **Flush ten confirmed rows.** Confirmed rows are staged locally. At 10 rows,
    write the batch transactionally to SQLite first, then replace or append the
    quoted CSV on the SMB-backed archive share using a temporary file and atomic

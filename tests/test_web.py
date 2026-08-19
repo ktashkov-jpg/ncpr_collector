@@ -68,6 +68,40 @@ def test_unexpected_api_errors_do_not_return_html(client):
     assert "database detail" not in response.get_data(as_text=True)
 
 
+def test_review_api_is_bounded_and_prioritizes_pending(client):
+    web, path = client
+    db = sqlite3.connect(path)
+    for index in range(25):
+        product_rowid = db.execute(
+            """INSERT INTO product(task_id, medicinal_product_identifier,
+               gtin_raw, gtin14, checksum_valid, retrieved_at)
+               VALUES(?,?,?,?,?,?)""",
+            (f"probe:{index}", "758", f"{index:014d}", f"{index:014d}", 1, "now"),
+        ).lastrowid
+        db.execute(
+            """INSERT INTO review_item(product_rowid, national_id, status,
+               created_at) VALUES(?,?,?,?)""",
+            (product_rowid, "758", "accepted", "now"),
+        )
+    pending_product = db.execute(
+        """INSERT INTO product(task_id, medicinal_product_identifier,
+           gtin_raw, gtin14, checksum_valid, retrieved_at)
+           VALUES(?,?,?,?,?,?)""",
+        ("pending", "758", "99999999999999", "99999999999999", 0, "now"),
+    ).lastrowid
+    pending_review = db.execute(
+        """INSERT INTO review_item(product_rowid, national_id, status,
+           created_at) VALUES(?,?,?,?)""",
+        (pending_product, "758", "pending", "now"),
+    ).lastrowid
+    db.commit()
+
+    rows = web.get("/api/reviews").json
+    assert len(rows) == 20
+    assert rows[0]["review_id"] == pending_review
+    assert rows[0]["status"] == "pending"
+
+
 def test_mutations_require_csrf_and_bulk_stays_locked(client):
     web, _ = client
     assert web.post("/api/export").status_code == 403
