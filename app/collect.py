@@ -18,17 +18,24 @@ Safety properties, each of which has a specific failure it prevents:
 from __future__ import annotations
 
 import datetime as dt
+import errno
 import os
 import random
 import signal
 import time
 from pathlib import Path
+from typing import BinaryIO
 
 from app import soap
 from app.config import Config
 from app.store import Store
 
 RUNNING = True
+LOCK_RECORD_BYTES = 64
+
+
+class CollectorLockHeld(RuntimeError):
+    """Raised when another process owns the collector's runtime lock."""
 
 
 def _stop(signum, frame):
@@ -73,19 +80,92 @@ def halt(config: Config, store: Store, reason: str) -> None:
     log("=" * 68)
 
 
-def acquire_lock(config: Config) -> None:
-    """Refuse to start a second collector against the same data volume."""
+def _open_lock_file(path: Path) -> BinaryIO:
+    """Open a fixed-size PID record that can be locked on Windows and POSIX."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = path.open("a+b", buffering=0)
+    handle.seek(0, os.SEEK_END)
+    missing = LOCK_RECORD_BYTES - handle.tell()
+    if missing > 0:
+        handle.write(b" " * missing)
+    return handle
+
+
+def _lock_nonblocking(handle: BinaryIO) -> None:
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError as exc:
+            if exc.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                raise BlockingIOError from exc
+            raise
+        return
+
+    import fcntl
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock(handle: BinaryIO) -> None:
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+
+    import fcntl
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def acquire_lock(config: Config) -> BinaryIO:
+    """Acquire the process lock, automatically released if the process dies."""
     path = Path(config.lock_file)
-    if path.exists():
-        pid = path.read_text(encoding="utf-8").strip()
-        raise SystemExit(
-            f"Lock file {path} exists (pid {pid}). Another collector may be "
-            f"running. If you are certain it is not, remove the file.")
-    path.write_text(str(os.getpid()), encoding="utf-8")
+    handle = _open_lock_file(path)
+    handle.seek(0)
+    try:
+        recorded_pid = handle.read(LOCK_RECORD_BYTES).decode(
+            "utf-8", "replace").strip()
+    except PermissionError:
+        # Windows denies reads of a byte range locked by another process.
+        recorded_pid = ""
+    try:
+        _lock_nonblocking(handle)
+    except BlockingIOError as exc:
+        handle.close()
+        raise CollectorLockHeld(
+            f"Another collector owns {path} "
+            f"(recorded pid {recorded_pid or 'unknown'})."
+        ) from exc
+
+    record = f"{os.getpid()}\n".encode("ascii").ljust(LOCK_RECORD_BYTES, b" ")
+    handle.seek(0)
+    handle.write(record)
+    handle.flush()
+    os.fsync(handle.fileno())
+    return handle
 
 
-def release_lock(config: Config) -> None:
-    Path(config.lock_file).unlink(missing_ok=True)
+def release_lock(handle: BinaryIO) -> None:
+    """Release a live lock; the PID record intentionally remains on disk."""
+    try:
+        _unlock(handle)
+    finally:
+        handle.close()
+
+
+def lock_is_held(config: Config) -> bool:
+    """Return actual lock ownership, never mere PID-file existence."""
+    handle = _open_lock_file(Path(config.lock_file))
+    try:
+        _lock_nonblocking(handle)
+    except BlockingIOError:
+        handle.close()
+        return True
+    try:
+        return False
+    finally:
+        release_lock(handle)
 
 
 def cache_wsdl(config: Config, store: Store, opener) -> str:
@@ -179,7 +259,10 @@ def main() -> None:
 
     config.ensure_dirs()
     store = Store(config.db_path)
-    acquire_lock(config)
+    try:
+        lock_handle = acquire_lock(config)
+    except CollectorLockHeld as exc:
+        raise SystemExit(str(exc)) from exc
     final_state = "stopped"
     try:
         store.set_bulk_state("running", pid=os.getpid())
@@ -265,9 +348,11 @@ def main() -> None:
 
         log(f"final queue state: {store.queue_stats()}")
     finally:
-        release_lock(config)
-        Path(config.stop_file).unlink(missing_ok=True)
-        store.set_bulk_state(final_state, note="queue state preserved")
+        try:
+            Path(config.stop_file).unlink(missing_ok=True)
+            store.set_bulk_state(final_state, note="queue state preserved")
+        finally:
+            release_lock(lock_handle)
 
 
 def _transaction_delay(config: Config, rng=random) -> int:

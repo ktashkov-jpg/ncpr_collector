@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.collect import acquire_lock, release_lock
 from app.store import Store
 from app.web import create_app
 
@@ -195,20 +196,63 @@ def test_bulk_start_and_stop_preserve_sqlite_queue(client, tmp_path):
         lock_file=str(tmp_path / "collector.lock"),
         stop_file=str(tmp_path / "STOP_REQUESTED"),
     )
+    lock_handles = []
+
+    def launch():
+        lock_handles.append(acquire_lock(runtime))
+        return SimpleNamespace(pid=4321)
+
     web.application.config.update(
         BULK_APPROVED=True,
         NCPR_CONFIG=runtime,
-        BULK_LAUNCHER=lambda: SimpleNamespace(pid=4321),
+        BULK_LAUNCHER=launch,
     )
-    token = csrf(web)
-    started = web.post(
-        "/api/collector/launch", json={"confirmed": True, "pending": 1},
-        headers={"X-CSRF-Token": token},
+    try:
+        token = csrf(web)
+        started = web.post(
+            "/api/collector/launch", json={"confirmed": True, "pending": 1},
+            headers={"X-CSRF-Token": token},
+        )
+        assert started.status_code == 202
+        stopped = web.post(
+            "/api/collector/stop", headers={"X-CSRF-Token": token})
+        assert stopped.status_code == 202
+        assert (tmp_path / "STOP_REQUESTED").exists()
+        status = db.execute(
+            "SELECT status FROM queue WHERE task_id='fwd:758'"
+        ).fetchone()[0]
+        assert status == "pending"
+        state = db.execute(
+            "SELECT state FROM bulk_run WHERE singleton=1"
+        ).fetchone()[0]
+        assert state == "stopping"
+    finally:
+        if lock_handles:
+            release_lock(lock_handles.pop())
+
+
+def test_status_reconciles_stale_bulk_state(client, tmp_path):
+    web, path = client
+    runtime = SimpleNamespace(
+        daily_cap=80,
+        halt_file=str(tmp_path / "HALTED"),
+        lock_file=str(tmp_path / "collector.lock"),
+        stop_file=str(tmp_path / "STOP_REQUESTED"),
     )
-    assert started.status_code == 202
-    stopped = web.post(
-        "/api/collector/stop", headers={"X-CSRF-Token": token})
-    assert stopped.status_code == 202
-    assert (tmp_path / "STOP_REQUESTED").exists()
-    assert db.execute("SELECT status FROM queue WHERE task_id='fwd:758'").fetchone()[0] == "pending"
-    assert db.execute("SELECT state FROM bulk_run WHERE singleton=1").fetchone()[0] == "stopping"
+    web.application.config["NCPR_CONFIG"] = runtime
+    db = sqlite3.connect(path)
+    db.execute(
+        "UPDATE bulk_run SET state='running', pid=20, "
+        "requested_at='2026-08-21T12:58:35+00:00', "
+        "started_at='2026-08-21T12:58:35+00:00' WHERE singleton=1"
+    )
+    db.commit()
+    (tmp_path / "collector.lock").write_text("20", encoding="utf-8")
+    (tmp_path / "STOP_REQUESTED").write_text("stop", encoding="utf-8")
+
+    status = web.get("/api/status").json
+
+    assert status["collector_running"] is False
+    assert status["bulk"]["state"] == "failed"
+    assert status["bulk"]["pid"] is None
+    assert not (tmp_path / "STOP_REQUESTED").exists()

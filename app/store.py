@@ -334,14 +334,30 @@ class Store:
     def set_bulk_state(self, state: str, *, pid: int | None = None,
                        actor: str | None = None, note: str | None = None) -> None:
         now = dt.datetime.now(dt.timezone.utc).isoformat()
-        started_at = now if state == "running" else None
-        stopped_at = now if state in {"stopped", "completed", "halted", "failed"} else None
-        requested_at = now if state == "starting" else None
+        current = self.bulk_state()
+        if state == "starting":
+            current_pid = pid
+            requested_at = now
+            started_at = None
+            stopped_at = None
+        elif state == "running":
+            current_pid = pid if pid is not None else current["pid"]
+            requested_at = current["requested_at"] or now
+            started_at = now
+            stopped_at = None
+        elif state == "stopping":
+            current_pid = pid if pid is not None else current["pid"]
+            requested_at = current["requested_at"]
+            started_at = current["started_at"]
+            stopped_at = None
+        else:
+            current_pid = None
+            requested_at = current["requested_at"]
+            started_at = current["started_at"]
+            stopped_at = now
         self.db.execute(
-            "UPDATE bulk_run SET state=?, pid=COALESCE(?,pid), "
-            "requested_at=COALESCE(?,requested_at), "
-            "started_at=COALESCE(?,started_at), "
-            "stopped_at=COALESCE(?,stopped_at), actor=COALESCE(?,actor), note=? "
+            "UPDATE bulk_run SET state=?, pid=?, requested_at=?, started_at=?, "
+            "stopped_at=?, actor=COALESCE(?,actor), note=? "
             "WHERE singleton=1",
-            (state, pid, requested_at, started_at, stopped_at, actor, note))
+            (state, current_pid, requested_at, started_at, stopped_at, actor, note))
         self.db.commit()

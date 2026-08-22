@@ -157,7 +157,7 @@ Each prevents a specific, real failure — not defensive decoration.
 | cap consumed **before** the request is sent | a crash mid-request would otherwise go uncounted |
 | 403/429 write a `HALTED` file; startup refuses while it exists | automatic resumption against a withdrawn allowlist |
 | `restart: "no"` in compose | a restart policy would fight the halt mechanism |
-| single-instance lock file | two containers doubling the effective rate |
+| crash-safe OS lock with a diagnostic PID record | two collectors doubling the effective rate; stale PID records after a crash are ignored |
 | raw XML archived **before** parsing | interrupted runs stay auditable (§11) |
 | WSDL fetched once, hash stored | re-fetching definitions per product (§9); a changed hash flags a moved contract |
 | GTIN stored as `TEXT`, export fully quoted | `05712249101367` → `5.71225E+12`. This project has been bitten three times already (HANDOVER §11) |

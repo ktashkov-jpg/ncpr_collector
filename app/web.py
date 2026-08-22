@@ -23,7 +23,10 @@ from flask import Flask, Response, abort, jsonify, render_template, request, ses
 from werkzeug.exceptions import HTTPException
 
 from app import soap
-from app.collect import acquire_lock, cache_wsdl, halt, in_window, release_lock, today
+from app.collect import (
+    CollectorLockHeld, acquire_lock, cache_wsdl, halt, in_window,
+    lock_is_held, release_lock, today,
+)
 from app.config import Config
 from app.store import Store
 
@@ -205,7 +208,8 @@ def create_app(test_config: dict | None = None) -> Flask:
             return jsonify(error="There are no pending bulk requests."), 409
         if Path(config.halt_file).exists():
             return jsonify(error="Bulk collection is halted. Resolve the hard stop first."), 409
-        if Path(config.lock_file).exists() or store.bulk_state()["state"] in {"starting", "running", "stopping"}:
+        running, bulk = _runtime_bulk_state(app, store)
+        if running or bulk["state"] in {"starting", "running", "stopping"}:
             return jsonify(error="Bulk collection is already active."), 409
         Path(config.stop_file).unlink(missing_ok=True)
         store.set_bulk_state("starting", actor=_actor(), note=f"pending={pending}")
@@ -225,8 +229,8 @@ def create_app(test_config: dict | None = None) -> Flask:
         _require_csrf()
         config = _config(app)
         store = Store(app.config["DB_PATH"])
-        state = store.bulk_state()["state"]
-        if state not in {"starting", "running", "stopping"} and not Path(config.lock_file).exists():
+        running, bulk = _runtime_bulk_state(app, store)
+        if not running and bulk["state"] not in {"starting", "running", "stopping"}:
             return jsonify(error="Bulk collection is not running."), 409
         Path(config.stop_file).write_text(
             f"{_now()}\noperator requested stop\n", encoding="utf-8")
@@ -262,7 +266,9 @@ def _db(app: Flask) -> sqlite3.Connection:
 
 def _status(app: Flask) -> dict:
     config = _config(app)
-    db = _db(app)
+    store = Store(app.config["DB_PATH"])
+    db = store.db
+    running, bulk = _runtime_bulk_state(app, store)
     day = dt.datetime.now().strftime("%Y-%m-%d")
     scalar = lambda sql, args=(): db.execute(sql, args).fetchone()[0]
     return {
@@ -272,9 +278,9 @@ def _status(app: Flask) -> dict:
         "pending_reviews": scalar("SELECT COUNT(*) FROM review_item WHERE status='pending'"),
         "staged": _accepted_unexported(db),
         "halted": Path(config.halt_file).exists(),
-        "collector_running": Path(config.lock_file).exists(),
+        "collector_running": running,
         "bulk_approved": app.config["BULK_APPROVED"],
-        "bulk": dict(db.execute("SELECT * FROM bulk_run WHERE singleton=1").fetchone()),
+        "bulk": bulk,
         "queue": {row["status"]: row["n"] for row in db.execute(
             "SELECT status, COUNT(*) n FROM queue GROUP BY status")},
         "collected_rows": scalar("SELECT COUNT(*) FROM product"),
@@ -309,10 +315,10 @@ def _lookup_one(app: Flask, national_id: str) -> tuple[dict, bool]:
             f"SOAP requests are allowed from {config.window_start_hour:02d}:00 to "
             f"{config.window_end_hour:02d}:00 local time."
         )
-    if Path(config.lock_file).exists():
-        raise LookupError("The collector is already using the SOAP connection.")
-
-    acquire_lock(config)
+    try:
+        lock_handle = acquire_lock(config)
+    except CollectorLockHeld as exc:
+        raise LookupError("The collector is already using the SOAP connection.") from exc
     try:
         opener = soap.make_opener(config.insecure_tls)
         wsdl_hash = cache_wsdl(config, store, opener)
@@ -379,7 +385,22 @@ def _lookup_one(app: Flask, national_id: str) -> tuple[dict, bool]:
                     local_modified=True, actor=_actor())
         return dict(row), False
     finally:
-        release_lock(config)
+        release_lock(lock_handle)
+
+
+def _runtime_bulk_state(app: Flask, store: Store) -> tuple[bool, dict]:
+    """Reconcile database state with the crash-safe process lock."""
+    config = _config(app)
+    running = lock_is_held(config)
+    bulk = store.bulk_state()
+    if not running and bulk["state"] in {"running", "stopping"}:
+        Path(config.stop_file).unlink(missing_ok=True)
+        store.set_bulk_state(
+            "failed", actor=_actor(),
+            note="Collector process ended without releasing runtime state",
+        )
+        bulk = store.bulk_state()
+    return running, bulk
 
 
 def _stage(db: sqlite3.Connection, product_rowid: int, national_id: str) -> None:
