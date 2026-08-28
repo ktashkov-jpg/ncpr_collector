@@ -18,6 +18,7 @@ import datetime as dt
 import sys
 
 from app.config import Config
+from app.collect import today
 from app.store import Store
 
 
@@ -32,7 +33,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     print(f"archive dir  : {config.archive_dir}")
     print(f"delay        : {config.delay_min_s}-{config.delay_max_s}s "
           f"(mode {config.delay_mode_s}s)")
-    print(f"daily cap    : {config.daily_cap}")
+    print(f"daily cap    : {config.daily_cap or 'unlimited'}")
     print(f"window       : {config.window_start_hour:02d}:00-"
           f"{config.window_end_hour:02d}:00 local")
     print(f"insecure TLS : {config.insecure_tls}")
@@ -65,11 +66,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 def cmd_status(args: argparse.Namespace) -> int:
     config = Config()
     store = Store(config.db_path)
-    day = dt.datetime.now().strftime("%Y-%m-%d")
+    day = today(config)
     stats = store.queue_stats()
     pending = stats.get("pending", 0)
     print(f"queue         : {stats}")
-    print(f"used today    : {store.used_today(day)}/{config.daily_cap}")
+    cap = config.daily_cap or "unlimited"
+    print(f"used today    : {store.used_today(day)}/{cap}")
     rows = store.db.execute("SELECT COUNT(*) n FROM product").fetchone()["n"]
     gtins = store.db.execute(
         "SELECT COUNT(DISTINCT gtin14) n FROM product").fetchone()["n"]
@@ -77,8 +79,11 @@ def cmd_status(args: argparse.Namespace) -> int:
         "SELECT COUNT(*) n FROM product WHERE checksum_valid=0").fetchone()["n"]
     print(f"product rows  : {rows} ({gtins} distinct GTIN-14, {bad} bad checksum)")
     if pending:
-        print(f"remaining     : ~{-(-pending // max(config.daily_cap, 1))} days "
-              f"at {config.daily_cap}/day")
+        if config.daily_cap is None:
+            print("remaining     : no daily cap")
+        else:
+            print(f"remaining     : ~{-(-pending // config.daily_cap)} days "
+                  f"at {config.daily_cap}/day")
     import os
     if os.path.exists(config.halt_file):
         print(f"\n*** HALTED *** {config.halt_file}")

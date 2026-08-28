@@ -25,6 +25,7 @@ import signal
 import time
 from pathlib import Path
 from typing import BinaryIO
+from zoneinfo import ZoneInfo
 
 from app import soap
 from app.config import Config
@@ -50,16 +51,20 @@ def log(message: str) -> None:
 
 
 def today(config: Config) -> str:
-    return dt.datetime.now().strftime("%Y-%m-%d")
+    return dt.datetime.now(ZoneInfo(getattr(config, "timezone", "Europe/Sofia"))).strftime("%Y-%m-%d")
+
+
+def local_now(config: Config) -> dt.datetime:
+    return dt.datetime.now(ZoneInfo(getattr(config, "timezone", "Europe/Sofia")))
 
 
 def in_window(config: Config) -> bool:
-    hour = dt.datetime.now().hour
+    hour = local_now(config).hour
     return config.window_start_hour <= hour < config.window_end_hour
 
 
 def seconds_until_window(config: Config) -> int:
-    now = dt.datetime.now()
+    now = local_now(config)
     target = now.replace(hour=config.window_start_hour, minute=0, second=0,
                          microsecond=0)
     if target <= now:
@@ -277,7 +282,7 @@ def main() -> None:
         consecutive_5xx = 0
         log(f"policy: 1 worker | delay {config.delay_min_s}-{config.delay_max_s}s "
             f"(mode {config.delay_mode_s}s) "
-            f"| cap {config.daily_cap}/day | window "
+            f"| cap {config.daily_cap or 'unlimited'}/day | window "
             f"{config.window_start_hour:02d}:00-{config.window_end_hour:02d}:00")
         log(f"queue: {store.queue_stats()}")
 
@@ -287,7 +292,7 @@ def main() -> None:
                 break
             day = today(config)
             used = store.used_today(day)
-            if used >= config.daily_cap:
+            if config.daily_cap is not None and used >= config.daily_cap:
                 wait = seconds_until_window(config)
                 log(f"daily cap reached ({used}/{config.daily_cap}); "
                     f"sleeping {wait // 3600}h until the next window")
@@ -307,7 +312,7 @@ def main() -> None:
 
             operation = soap.FORWARD if task["kind"] == "forward" else soap.REVERSE
             used = store.consume(day)           # count before sending
-            log(f"[{used}/{config.daily_cap}] {task['task_id']} "
+            log(f"[{used}{('/' + str(config.daily_cap)) if config.daily_cap is not None else ''}] {task['task_id']} "
                 f"(p{task['priority']}) {task['reason'][:46]}")
 
             try:

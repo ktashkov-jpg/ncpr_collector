@@ -185,7 +185,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         Store(app.config["DB_PATH"]).audit(
             "export_all_collected", "success", local_modified=False,
             actor=_actor(), detail=f"rows={len(rows)}")
-        stamp = dt.datetime.now().strftime("%Y-%m-%d")
+        stamp = today(_config(app))
         return Response(
             "\ufeff" + output.getvalue(), mimetype="text/csv",
             headers={"Content-Disposition":
@@ -269,7 +269,7 @@ def _status(app: Flask) -> dict:
     store = Store(app.config["DB_PATH"])
     db = store.db
     running, bulk = _runtime_bulk_state(app, store)
-    day = dt.datetime.now().strftime("%Y-%m-%d")
+    day = today(config)
     scalar = lambda sql, args=(): db.execute(sql, args).fetchone()[0]
     return {
         "catalogue_rows": scalar("SELECT COUNT(*) FROM local_catalogue"),
@@ -308,7 +308,8 @@ def _lookup_one(app: Flask, national_id: str) -> tuple[dict, bool]:
         return dict(existing), True
     if Path(config.halt_file).exists():
         raise LookupError("Requests are halted. Resolve the recorded hard stop before retrying.")
-    if store.used_today(today(config)) >= config.daily_cap:
+    if (config.daily_cap is not None and
+            store.used_today(today(config)) >= config.daily_cap):
         raise LookupError("Today’s request cap has been reached.")
     if not in_window(config):
         raise LookupError(

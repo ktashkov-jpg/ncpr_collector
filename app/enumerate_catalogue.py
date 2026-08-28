@@ -31,6 +31,7 @@ from pathlib import Path
 
 from app import soap
 from app.config import Config
+from app.collect import today
 from app.store import Store
 
 FIELD_MAP = {
@@ -87,18 +88,19 @@ def main() -> int:
     opener = soap.make_opener(config.insecure_tls)
     registers = args.register or list(soap.REGISTER_CODES)
     delay = args.delay if args.delay is not None else config.delay_min_s
-    day = dt.datetime.now().strftime("%Y-%m-%d")
+    day = today(config)
     now = dt.datetime.now(dt.timezone.utc).isoformat()
 
     print(f"registers: {', '.join(registers)}")
     print(f"page size: {args.page_size} | delay {delay}s | "
-          f"cap {store.used_today(day)}/{config.daily_cap} used today\n")
+          f"cap {store.used_today(day)}/{config.daily_cap or 'unlimited'} used today\n")
 
     totals: dict[str, int] = {}
     for register in registers:
         from_row, saved, expected = 0, 0, None
         while True:
-            if store.used_today(day) >= config.daily_cap:
+            if (config.daily_cap is not None and
+                    store.used_today(day) >= config.daily_cap):
                 print("  daily cap reached - stopping. Re-run tomorrow; "
                       "already-saved pages are kept.")
                 return 0

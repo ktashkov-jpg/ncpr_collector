@@ -223,8 +223,11 @@ def main() -> None:
 
     per_day = config.daily_cap
     pending = store.queue_stats().get("pending", 0)
-    print(f"\nAt {per_day}/day that is ~{-(-pending // max(per_day, 1))} days "
-          f"of collection.")
+    if per_day is None:
+        print("\nNo daily request cap is configured.")
+    else:
+        print(f"\nAt {per_day}/day that is ~{-(-pending // per_day)} days "
+              f"of collection.")
 
 
 if __name__ == "__main__":

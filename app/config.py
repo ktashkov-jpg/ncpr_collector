@@ -21,6 +21,11 @@ def _str(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
+def _cap(name: str, default: int) -> int | None:
+    value = _int(name, default)
+    return None if value == 0 else value
+
+
 _DELAY_MIN_S = _int("NCPR_DELAY_MIN_S", 180)
 _DELAY_MAX_S = _int("NCPR_DELAY_MAX_S", 480)
 _DELAY_MODE_DEFAULT = round(
@@ -42,9 +47,12 @@ class Config:
     delay_min_s: int = _DELAY_MIN_S
     delay_mode_s: int = _int("NCPR_DELAY_MODE_S", _DELAY_MODE_DEFAULT)
     delay_max_s: int = _DELAY_MAX_S
-    daily_cap: int = _int("NCPR_DAILY_CAP", 80)
+    # 0 disables the calendar-day cap. The SQLite counter is still retained
+    # for audit/status purposes.
+    daily_cap: int | None = _cap("NCPR_DAILY_CAP", 0)
     window_start_hour: int = _int("NCPR_WINDOW_START_HOUR", 8)   # local time
-    window_end_hour: int = _int("NCPR_WINDOW_END_HOUR", 18)
+    window_end_hour: int = _int("NCPR_WINDOW_END_HOUR", 20)
+    timezone: str = _str("NCPR_TIMEZONE", "Europe/Sofia")
 
     # --- transport ---
     timeout_s: int = _int("NCPR_TIMEOUT_S", 60)
@@ -143,7 +151,7 @@ class Config:
             raise ValueError(
                 "Refusing a sub-60s delay against a monitored allowlisted "
                 "service. Raise NCPR_DELAY_MIN_S or edit this check knowingly.")
-        if self.daily_cap > 500:
+        if self.daily_cap is not None and self.daily_cap > 500:
             raise ValueError(
                 "NCPR_DAILY_CAP above 500 is not a conservative policy; "
                 "get written rate guidance from NCPR first.")

@@ -35,6 +35,7 @@ from pathlib import Path
 
 from app import soap
 from app.config import Config
+from app.collect import today
 from app.store import Store
 
 
@@ -52,9 +53,9 @@ def main() -> int:
     config.ensure_dirs()
 
     store = Store(config.db_path)
-    day = dt.datetime.now().strftime("%Y-%m-%d")
+    day = today(config)
     used = store.used_today(day)
-    if used >= config.daily_cap:
+    if config.daily_cap is not None and used >= config.daily_cap:
         raise SystemExit(f"daily cap reached ({used}/{config.daily_cap}).")
 
     operation = soap.REVERSE if args.gtin else soap.FORWARD
@@ -76,7 +77,8 @@ def main() -> int:
             print(f"indicator  {indicator} ({note})")
 
     store.consume(day)
-    print(f"\n[{used + 1}/{config.daily_cap}] {operation}({key})")
+    counter = f"{used + 1}/{config.daily_cap}" if config.daily_cap is not None else str(used + 1)
+    print(f"\n[{counter}] {operation}({key})")
     started = time.time()
     try:
         status, body, elapsed = soap.call(

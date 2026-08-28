@@ -29,7 +29,7 @@
   <main>
     <section class="status-strip" aria-label="Operational status">
       <div><span>Local catalogue</span><strong data-catalogue-count>{{ status.catalogue_rows }}</strong></div>
-      <div><span>Requests today</span><strong><b data-used>{{ status.requests_used }}</b> / {{ status.daily_cap }}</strong></div>
+      <div><span>Requests today</span><strong><b data-used>{{ status.requests_used }}</b> / {{ status.daily_cap or "unlimited" }}</strong></div>
       <div><span>Review queue</span><strong data-pending>{{ status.pending_reviews }}</strong></div>
       <div><span>Confirmed batch</span><strong><b data-staged>{{ status.staged }}</b> / 10</strong></div>
       <div class="bulk-control"><span>Bulk state</span><strong data-bulk-state>{{ status.bulk.state }}</strong></div>
