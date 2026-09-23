@@ -107,6 +107,27 @@ the worst possible ordering for a 40-day job.
 Add `--contested contested.csv` (a CSV with a `reg_number` column) to promote
 registrations our own matchers disagree on into priority band 30.
 
+### Extend the live manifest to the full NCPR catalogue
+
+After the Appendix 1 run has completed, copy the canonical scrape onto the
+collector's archive volume. Do **not** replace `$DB_ROOT/ncpr.sqlite3`: it is
+the collector's completed-work memory, daily counter, audit history, and
+existing Appendix queue.
+
+```bash
+cp /path/to/ncpr_scrape_canonical.csv "$ARCHIVE_ROOT/input/"
+docker compose run --rm ncpr-collector python -m app.queue_build \
+  --catalogue-csv /archive/input/ncpr_scrape_canonical.csv
+```
+
+This adds only national IDs which have no existing `fwd:<national-id>` task.
+Completed Appendix results remain completed, and their priority bands (10--40)
+stay ahead of the expansion. Canonical rows with `in_active=true` are added at
+band 50; all other scraped national IDs are added at band 60. The command
+records the source name, row count, and SHA-256 in SQLite metadata so the live
+manifest can be traced back to the exact input file. Re-running it is safe and
+adds no duplicate SOAP calls.
+
 **Re-running does not re-prioritise.** Tasks are inserted with
 `INSERT OR IGNORE`, so an existing row keeps its original band. To rebuild an
 ordering, delete the database first — safe only while nothing has been

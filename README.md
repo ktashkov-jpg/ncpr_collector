@@ -125,6 +125,12 @@ docker compose up -d ncpr-web
 Publish `127.0.0.1:6001` only through the deployment's existing reverse proxy
 and IP allowlist. Do not expose Gunicorn directly to the public internet.
 
+To extend a completed Appendix queue to every national ID in the canonical
+NCPR scrape, run `app.queue_build --catalogue-csv` against the existing SQLite
+database. It appends only unseen `fwd:<national-id>` tasks and never resets
+completed work, counters, audit history, or the original queue. See
+`docs/OPERATIONS.md` for the deployment command.
+
 ## Queue priority — why it is not sequential
 
 At ~80 calls/day a full sweep takes about **40 days**, so the *order* decides

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Build the work queue from Annex 4, ordered by decision value.
+"""Build the work queue from Annex 4 or the full NCPR catalogue.
 
 At ~80 calls/day a full sweep of the active PLS takes roughly a month, so
 the ORDER of the queue decides when useful answers arrive, not whether they
@@ -27,11 +27,18 @@ Priority bands (lower runs first):
 Rows whose status is not 'Активен' are not queued at all: the runbook (§8)
 notes the workbook carries historical rows, and only active ones should
 drive the initial enrichment.
+
+The canonical NCPR catalogue is deliberately a separate input mode.  It has
+one row per national ID and extends an already-running Appendix queue without
+altering its rows: ``fwd:<national-id>`` is the shared, stable task identity,
+and insertion is idempotent.  This lets the full-market sweep resume against
+the server's existing SQLite database rather than replacing its history.
 """
 from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import os
 import sys
 from collections import defaultdict
@@ -84,6 +91,54 @@ def read_annex(path: Path) -> list[dict]:
     return rows
 
 
+def read_canonical_catalogue(path: Path) -> list[dict]:
+    """Read one canonical NCPR catalogue row per national ID.
+
+    Unlike the Appendix workbook, this source intentionally includes every
+    scraped national ID, not only the subset marked ``in_active``.  SESPA is
+    the authority on whether a package has a GTIN; a valid lookup with an
+    empty GTIN list is retained as a completed ``no_gtin`` result.
+    """
+    required = {"national_num", "in_active", "source_datasets"}
+    rows: list[dict] = []
+    seen: set[str] = set()
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        headers = set(reader.fieldnames or [])
+        missing = required - headers
+        if missing:
+            raise ValueError(
+                f"canonical catalogue missing required columns: "
+                f"{', '.join(sorted(missing))}")
+        for line_number, row in enumerate(reader, start=2):
+            national_id = norm_id(row.get("national_num"))
+            if not national_id.isdigit():
+                raise ValueError(
+                    f"canonical catalogue row {line_number} has invalid "
+                    f"national_num: {national_id!r}")
+            if national_id in seen:
+                raise ValueError(
+                    f"canonical catalogue has duplicate national_num: "
+                    f"{national_id}")
+            seen.add(national_id)
+            rows.append({
+                "national_id": national_id,
+                "in_active": str(row.get("in_active") or "").strip().casefold() == "true",
+                "source_datasets": str(row.get("source_datasets") or "").strip(),
+            })
+    if not rows:
+        raise ValueError(f"canonical catalogue has no usable rows: {path}")
+    return rows
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def drug_ref_group_sizes(path: Path) -> dict[str, int]:
     sizes: dict[str, int] = defaultdict(int)
     if not path.exists():
@@ -113,7 +168,10 @@ def main() -> None:
     # Not required: with no --annex the newest Prilogenie-*.xlsx in the input
     # directory is used, so `fetch_register` then `queue_build` needs no path
     # passed between them.
-    parser.add_argument("--annex", type=Path)
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--annex", type=Path)
+    source.add_argument("--catalogue-csv", type=Path,
+                        help="canonical ncpr_scrape_canonical.csv; queues every national ID")
     # Defaults point at the archive volume, not at the authoring machine.
     # These were hardcoded Windows paths, which on the Linux host resolved to
     # nothing and silently produced a queue with every task in the lowest
@@ -138,7 +196,7 @@ def main() -> None:
     config.ensure_dirs()
     store = Store(config.db_path)
 
-    if args.annex is None:
+    if args.catalogue_csv is None and args.annex is None:
         candidates = sorted(Path(config.input_dir).glob("Prilogenie-*.xlsx"))
         if not candidates:
             raise SystemExit(
@@ -149,7 +207,44 @@ def main() -> None:
         args.annex = max(candidates, key=lambda p: p.stat().st_mtime)
         print(f"using {args.annex.name} (newest in {config.input_dir})\n")
 
-    # Priority ordering is the whole design of this queue: without the
+    if args.catalogue_csv:
+        catalogue = read_canonical_catalogue(args.catalogue_csv)
+        added = defaultdict(int)
+        for row in catalogue:
+            # Appendix rows have bands 20--40.  Keep the current collection
+            # order intact, then prioritize currently-active catalogue rows
+            # ahead of the historical/other-status tail.
+            priority = 50 if row["in_active"] else 60
+            reason = (
+                "full NCPR catalogue (in_active)"
+                if row["in_active"] else "full NCPR catalogue (other status)"
+            )
+            if store.add_task(f"fwd:{row['national_id']}", "forward",
+                              row["national_id"], priority, reason):
+                added[f"{priority} forward"] += 1
+
+        source_hash = file_sha256(args.catalogue_csv)
+        store.set_meta("full_catalogue_source", args.catalogue_csv.name)
+        store.set_meta("full_catalogue_sha256", source_hash)
+        store.set_meta("full_catalogue_rows", str(len(catalogue)))
+        print(f"Canonical catalogue rows : {len(catalogue)}")
+        print(f"  in_active              : {sum(r['in_active'] for r in catalogue)}")
+        print(f"  other status           : {sum(not r['in_active'] for r in catalogue)}")
+        print(f"  source SHA-256         : {source_hash}")
+        print("\nnewly queued (existing tasks were retained):")
+        for band, count in sorted(added.items()):
+            print(f"  {band:34} {count}")
+        print(f"\nqueue now: {store.queue_stats()}")
+        per_day = config.daily_cap
+        pending = store.queue_stats().get("pending", 0)
+        if per_day is None:
+            print("\nNo daily request cap is configured.")
+        else:
+            print(f"\nAt {per_day}/day that is ~{-(-pending // per_day)} days "
+                  "of collection.")
+        return
+
+    # Priority ordering is the whole design of the Appendix queue: without the
     # reference files every task collapses into the lowest band and the
     # decisive answers arrive last. Refuse to build a silently-degraded
     # queue -- 40 days is too long to spend running in the wrong order.
